@@ -1,0 +1,295 @@
+"""
+광고 성과 장표 자동화 - Streamlit 웹앱
+CSV 파일 업로드 → Excel 장표 + HTML 대시보드 자동 생성
+"""
+
+import streamlit as st
+import pandas as pd
+import tempfile
+import shutil
+import unicodedata
+import traceback
+from pathlib import Path
+from datetime import datetime
+import sys
+
+# ── 페이지 설정 ─────────────────────────────────────────
+st.set_page_config(
+    page_title="광고 성과 장표 자동화",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# ── 헬퍼 함수 ───────────────────────────────────────────
+def find_csv(folder: Path, keyword: str) -> list:
+    """폴더에서 keyword를 포함하는 CSV 목록 반환 (NFD/NFC 한글 대응)"""
+    if not folder.exists():
+        return []
+    kw_nfc = unicodedata.normalize('NFC', keyword)
+    kw_nfd = unicodedata.normalize('NFD', keyword)
+    result = []
+    for f in folder.iterdir():
+        if f.suffix.lower() != '.csv':
+            continue
+        name_nfc = unicodedata.normalize('NFC', f.name)
+        name_nfd = unicodedata.normalize('NFD', f.name)
+        if kw_nfc in name_nfc or kw_nfd in name_nfd:
+            result.append(str(f))
+    return sorted(result)
+
+
+def load_or_empty(parse_fn, files, **kwargs):
+    """파일 목록 파싱 후 concat, 없으면 None"""
+    if not files:
+        return None
+    dfs = []
+    for f in files:
+        try:
+            df = parse_fn(f, **kwargs)
+            dfs.append(df)
+            st.write(f"  ✅ {Path(f).name}")
+        except Exception as e:
+            st.warning(f"  ⚠️ {Path(f).name}: {e}")
+    return pd.concat(dfs, ignore_index=True) if dfs else None
+
+
+# ── UI 헤더 ─────────────────────────────────────────────
+st.title("📊 광고 성과 장표 자동 생성")
+st.caption("CSV 파일을 업로드하면 Excel 장표와 HTML 대시보드를 자동으로 생성합니다.")
+st.divider()
+
+# ── 파일 업로드 섹션 ─────────────────────────────────────
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("### 🟢 네이버 SA")
+    naver_files = st.file_uploader(
+        "주간리포트 + 키워드별 성과",
+        type="csv",
+        accept_multiple_files=True,
+        key="naver",
+        help="파일명에 '주간리포트' 또는 '키워드별' 이 포함된 CSV"
+    )
+    if naver_files:
+        for f in naver_files:
+            st.caption(f"📎 {f.name}")
+
+with col2:
+    st.markdown("### 🔵 구글 SA")
+    gsa_files = st.file_uploader(
+        "게재된 시점 + 검색 키워드 + 전환 + 검색어",
+        type="csv",
+        accept_multiple_files=True,
+        key="gsa",
+        help="파일명에 '게재된 시점', '검색 키워드', '전환', '검색어' 가 포함된 CSV"
+    )
+    if gsa_files:
+        for f in gsa_files:
+            st.caption(f"📎 {f.name}")
+
+with col3:
+    st.markdown("### 🔴 구글 DA")
+    gda_files = st.file_uploader(
+        "게재된 시점 + 검색 키워드 + 전환",
+        type="csv",
+        accept_multiple_files=True,
+        key="gda",
+        help="파일명에 '게재된 시점', '검색 키워드', '전환' 이 포함된 CSV"
+    )
+    if gda_files:
+        for f in gda_files:
+            st.caption(f"📎 {f.name}")
+
+st.divider()
+
+# ── SNS 관리대장 연동 (선택) ──────────────────────────────
+with st.expander("📱 SNS 채널 관리대장 연동 (선택사항)", expanded=False):
+    st.caption("SNS_채널_관리대장.xlsx 를 업로드하면 종합 장표에 채널 현황이 함께 표시됩니다.")
+    sns_file = st.file_uploader(
+        "SNS 관리대장 파일",
+        type=["xlsx"],
+        key="sns",
+        help="이전에 생성한 SNS_채널_관리대장.xlsx 파일을 업로드하세요."
+    )
+    if sns_file:
+        st.caption(f"📎 {sns_file.name}")
+
+st.divider()
+
+# ── 생성 버튼 ────────────────────────────────────────────
+generate = st.button("🚀 보고서 생성", type="primary", use_container_width=True)
+
+if generate:
+    if not naver_files and not gsa_files and not gda_files:
+        st.error("❌ 파일을 하나 이상 업로드해주세요.")
+    else:
+        tmp = None
+        try:
+            with st.spinner("보고서 생성 중... 잠시만 기다려주세요."):
+
+                # 임시 폴더 구조 생성
+                tmp = tempfile.mkdtemp()
+                naver_dir = Path(tmp) / "naver"
+                gsa_dir   = Path(tmp) / "google_sa"
+                gda_dir   = Path(tmp) / "google_da"
+                for d in [naver_dir, gsa_dir, gda_dir]:
+                    d.mkdir()
+
+                # 업로드된 파일 저장
+                for f in (naver_files or []):
+                    (naver_dir / f.name).write_bytes(f.read())
+                for f in (gsa_files or []):
+                    (gsa_dir / f.name).write_bytes(f.read())
+                for f in (gda_files or []):
+                    (gda_dir / f.name).write_bytes(f.read())
+
+                # SNS 관리대장 저장 (있을 경우)
+                sns_path = None
+                if sns_file:
+                    sns_save = Path(tmp) / sns_file.name
+                    sns_save.write_bytes(sns_file.read())
+                    sns_path = str(sns_save)
+
+                # 파서 임포트
+                sys.path.insert(0, str(Path(__file__).parent))
+                from parsers import (
+                    parse_naver_weekly, parse_naver_keywords,
+                    parse_google_daily, parse_google_keywords,
+                    parse_google_conversions, parse_google_search_terms
+                )
+                from report_builder import build_report
+                from html_builder import build_html_report
+
+                # 파일 탐색
+                naver_weekly_files = find_csv(naver_dir, '주간리포트')
+                naver_kw_files     = find_csv(naver_dir, '키워드별')
+                gsa_daily_files    = find_csv(gsa_dir,   '게재된 시점')
+                gsa_kw_files       = find_csv(gsa_dir,   '검색 키워드')
+                gsa_conv_files     = find_csv(gsa_dir,   '전환')
+                gsa_srch_files     = find_csv(gsa_dir,   '검색어')
+                gda_daily_files    = find_csv(gda_dir,   '게재된 시점')
+                gda_kw_files       = find_csv(gda_dir,   '검색 키워드')
+                gda_conv_files     = find_csv(gda_dir,   '전환')
+
+                # Raw 데이터 파싱
+                raw_dfs = []
+
+                naver_raw = load_or_empty(parse_naver_weekly, naver_weekly_files)
+                if naver_raw is not None:
+                    raw_dfs.append(naver_raw)
+
+                gsa_raw = load_or_empty(parse_google_daily, gsa_daily_files, media_type='Google_SA')
+                if gsa_raw is not None:
+                    raw_dfs.append(gsa_raw)
+
+                gda_raw = load_or_empty(parse_google_daily, gda_daily_files, media_type='Google_DA')
+                if gda_raw is not None:
+                    raw_dfs.append(gda_raw)
+
+                if not raw_dfs:
+                    st.error("❌ 유효한 데이터가 없습니다. 파일명을 확인해주세요.")
+                    st.info("파일명에 '주간리포트', '게재된 시점' 키워드가 포함되어야 합니다.")
+                    st.stop()
+
+                raw_df = pd.concat(raw_dfs, ignore_index=True)
+                raw_df = raw_df.sort_values(['날짜', '매체', '디바이스']).reset_index(drop=True)
+
+                # 부가 데이터 파싱
+                naver_kw   = load_or_empty(parse_naver_keywords, naver_kw_files)
+                gsa_kw     = load_or_empty(parse_google_keywords, gsa_kw_files)
+                gda_kw     = load_or_empty(parse_google_keywords, gda_kw_files)
+                srch_df    = load_or_empty(parse_google_search_terms, gsa_srch_files)
+
+                sa_conv_df = load_or_empty(parse_google_conversions, gsa_conv_files)
+                if sa_conv_df is not None:
+                    sa_conv_df = sa_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+
+                da_conv_df = load_or_empty(parse_google_conversions, gda_conv_files)
+                if da_conv_df is not None:
+                    da_conv_df = da_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+
+                # 기간 라벨 생성
+                dates = pd.to_datetime(raw_df['날짜'])
+                period_label = f'{dates.min().strftime("%Y.%m.%d")} ~ {dates.max().strftime("%Y.%m.%d")}'
+
+                # 출력 파일 경로
+                today = datetime.now().strftime('%Y%m%d')
+                xlsx_path = str(Path(tmp) / f'광고성과_장표_{today}.xlsx')
+                html_path = str(Path(tmp) / f'광고성과_대시보드_{today}.html')
+
+                # Excel 장표 생성
+                build_report(
+                    raw_df=raw_df,
+                    naver_kw_df=naver_kw,
+                    google_sa_kw_df=gsa_kw,
+                    google_da_kw_df=gda_kw,
+                    sa_conv_df=sa_conv_df,
+                    da_conv_df=da_conv_df,
+                    search_terms_df=srch_df,
+                    period_label=period_label,
+                    output_path=xlsx_path,
+                    sns_tracker_path=sns_path,
+                )
+
+                # HTML 대시보드 생성
+                build_html_report(
+                    raw_df=raw_df,
+                    sa_conv_df=sa_conv_df,
+                    da_conv_df=da_conv_df,
+                    period_label=period_label,
+                    output_path=html_path,
+                    sns_tracker_path=sns_path,
+                )
+
+            # ── 완료 & 다운로드 ──────────────────────────
+            st.success(f"✅ 보고서 생성 완료!  |  기간: {period_label}")
+            st.balloons()
+
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                with open(xlsx_path, 'rb') as f:
+                    st.download_button(
+                        label="📊 Excel 장표 다운로드",
+                        data=f.read(),
+                        file_name=f'광고성과_장표_{today}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True,
+                        type="primary"
+                    )
+            with col_dl2:
+                with open(html_path, 'rb') as f:
+                    st.download_button(
+                        label="🌐 HTML 대시보드 다운로드",
+                        data=f.read(),
+                        file_name=f'광고성과_대시보드_{today}.html',
+                        mime='text/html',
+                        use_container_width=True
+                    )
+
+        except Exception as e:
+            st.error(f"❌ 오류 발생: {e}")
+            with st.expander("오류 상세 보기"):
+                st.code(traceback.format_exc())
+        finally:
+            if tmp and Path(tmp).exists():
+                shutil.rmtree(tmp, ignore_errors=True)
+
+# ── 하단 안내 ────────────────────────────────────────────
+st.divider()
+with st.expander("📌 파일명 규칙 안내"):
+    st.markdown("""
+    파일명에 아래 키워드가 **반드시 포함**되어야 자동 인식됩니다.
+
+    | 매체 | 파일 종류 | 파일명에 포함될 키워드 |
+    |------|----------|----------------------|
+    | 네이버 SA | 일별 성과 | `주간리포트` |
+    | 네이버 SA | 키워드 성과 | `키워드별` |
+    | 구글 SA | 일별 성과 | `게재된 시점` |
+    | 구글 SA | 키워드 | `검색 키워드` |
+    | 구글 SA | 전환 | `전환` |
+    | 구글 SA | 검색어 | `검색어` |
+    | 구글 DA | 일별 성과 | `게재된 시점` |
+    | 구글 DA | 키워드 | `검색 키워드` |
+    | 구글 DA | 전환 | `전환` |
+    """)

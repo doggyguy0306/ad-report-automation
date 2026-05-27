@@ -1,0 +1,24 @@
+# 광고 원본 데이터 (CSV) — GitHub에 올리지 않음
+raw_data/
+
+# 생성된 보고서
+reports/
+
+# SNS 관리대장 (로컬 파일)
+*.xlsx
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# macOS 시스템 파일
+.DS_Store
+.DS_Store?
+._*
+
+# 환경 설정
+.env
+venv/
+.venv/
