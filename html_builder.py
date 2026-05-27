@@ -347,8 +347,10 @@ def _sns_summary_cards(channel_data: dict) -> str:
         main_col = meta['main_col']
 
         if rows:
-            latest = rows[-1][main_col]
-            prev   = rows[-2][main_col] if len(rows) >= 2 else None
+            # 마지막으로 실제 값이 입력된 행을 찾음 (빈 날짜 행 무시)
+            filled = [r for r in rows if r[main_col] is not None]
+            latest = filled[-1][main_col] if filled else None
+            prev   = filled[-2][main_col] if len(filled) >= 2 else None
             val_str  = _f(latest) if latest is not None else '-'
             if prev is not None and latest is not None:
                 try:
@@ -397,8 +399,9 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
         )
         return placeholder
 
-    # 최근 14일치만 표시
-    recent = rows[-14:]
+    # 값이 입력된 행만 필터링 후 최근 14일치 표시
+    filled_rows = [r for r in rows if any(r[ci] is not None for ci in col_idx[1:])]
+    recent = filled_rows[-14:] if filled_rows else rows[-14:]
 
     # 미니 트렌드 SVG (메인 지표)
     trend_vals = []
