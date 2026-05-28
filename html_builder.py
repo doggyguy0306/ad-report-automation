@@ -228,11 +228,31 @@ def _svg_pie(labels, values, colors, title=''):
 # HTML 섹션 빌더
 # ════════════════════════════════════════════
 
-def _kpi_card(label, value, sub='', color=C_NAVY):
+def _pct_mom(curr, prev):
+    """전월 대비 % 변화 → (표시문자열, 색상코드). 데이터 없으면 None"""
+    try:
+        c, p = float(curr), float(prev)
+        if p == 0:
+            return None
+        pct = (c - p) / abs(p) * 100
+        sign = '+' if pct >= 0 else ''
+        color = '#16A34A' if pct >= 0 else '#DC2626'
+        return (f'{sign}{pct:.1f}%', color)
+    except Exception:
+        return None
+
+
+def _kpi_card(label, value, sub='', color=C_NAVY, mom=None):
+    mom_html = ''
+    if mom:
+        mom_str, mom_color = mom
+        mom_html = (f'<div class="kpi-mom" style="color:{mom_color}">'
+                    f'전월 동기간 대비 {mom_str}</div>')
     return (f'<div class="kpi-card" style="border-top:4px solid {color}">'
             f'<div class="kpi-label">{label}</div>'
             f'<div class="kpi-value" style="color:{color}">{value}</div>'
             f'<div class="kpi-sub">{sub}</div>'
+            f'{mom_html}'
             f'</div>')
 
 
@@ -342,38 +362,64 @@ def _read_sns_channel_data(sns_path: str) -> dict:
     return result
 
 
+def _sns_mom_for_channel(rows, main_col):
+    """SNS rows 내에서 전월 동기간 메인 지표 값 반환 (없으면 None)"""
+    try:
+        from dateutil.relativedelta import relativedelta
+        filled = [(pd.Timestamp(r[0]), float(r[main_col]))
+                  for r in rows if r[main_col] is not None and r[0] is not None]
+        if not filled:
+            return None
+        curr_end_date = filled[-1][0]
+        prev_end_date = curr_end_date - relativedelta(months=1)
+        # 전월 동일 날짜에서 가장 가까운 값
+        prev_val = None
+        min_diff = None
+        for d, v in filled:
+            diff = abs((d - prev_end_date).days)
+            if min_diff is None or diff < min_diff:
+                min_diff = diff
+                prev_val = v
+        return prev_val if min_diff is not None and min_diff <= 5 else None
+    except Exception:
+        return None
+
+
 def _sns_summary_cards(channel_data: dict) -> str:
-    """채널별 메인 지표 KPI 카드 5개 (한 줄)"""
+    """채널별 메인 지표 KPI 카드 5개 (한 줄) + 전월 동기간 대비"""
     cards = ''
     for ch in _SNS_CHANNEL_ORDER:
-        meta  = _SNS_META[ch]
-        color = meta['color']
-        rows  = channel_data.get(ch, {}).get('rows', [])
+        meta     = _SNS_META[ch]
+        color    = meta['color']
+        rows     = channel_data.get(ch, {}).get('rows', [])
         main_col = meta['main_col']
 
         if rows:
-            # 마지막으로 실제 값이 입력된 행을 찾음 (빈 날짜 행 무시)
-            filled = [r for r in rows if r[main_col] is not None]
+            filled = [r for r in rows if main_col < len(r) and r[main_col] is not None]
             latest = filled[-1][main_col] if filled else None
             prev   = filled[-2][main_col] if len(filled) >= 2 else None
-            val_str  = _f(latest) if latest is not None else '-'
+            val_str = _f(latest) if latest is not None else '-'
             if prev is not None and latest is not None:
                 try:
                     diff = float(latest) - float(prev)
                     sign = '+' if diff >= 0 else ''
-                    delta_str = f'{sign}{_f(diff)}'
+                    delta_str   = f'{sign}{_f(diff)}'
                     delta_color = '#16A34A' if diff >= 0 else '#DC2626'
                 except Exception:
                     delta_str, delta_color = '-', C_MUTED
             else:
                 delta_str, delta_color = '입력 대기', C_MUTED
-        else:
-            val_str, delta_str, delta_color = '미입력', '-', C_MUTED
 
-        # 지표 이름 (메인 컬럼 헤더)
-        headers = channel_data.get(ch, {}).get('headers', [])
+            # 전월 동기간 대비
+            prev_mom_val = _sns_mom_for_channel(rows, main_col)
+            mom          = _pct_mom(latest, prev_mom_val) if (latest is not None and prev_mom_val) else None
+            mom_html = (f'<div class="kpi-mom" style="color:{mom[1]}">전월 동기간 {mom[0]}</div>'
+                        if mom else '')
+        else:
+            val_str, delta_str, delta_color, mom_html = '미입력', '-', C_MUTED, ''
+
+        headers     = channel_data.get(ch, {}).get('headers', [])
         metric_name = headers[main_col] if headers and len(headers) > main_col else '주요지표'
-        ch_name = ch[2:].strip()  # 이모지 제거
 
         cards += (
             f'<div class="sns-kpi" style="border-top:4px solid {color}">'
@@ -381,6 +427,7 @@ def _sns_summary_cards(channel_data: dict) -> str:
             f'<div class="sns-metric-label">{metric_name}</div>'
             f'<div class="sns-value" style="color:{color}">{val_str}</div>'
             f'<div class="sns-delta" style="color:{delta_color}">전일대비 {delta_str}</div>'
+            f'{mom_html}'
             f'</div>'
         )
     return f'<div class="sns-kpi-grid">{cards}</div>'
@@ -433,7 +480,24 @@ def _sns_stats_summary(ch: str, data: dict) -> str:
         f'<div class="stat-sub">(기간 첫날 대비)</div></div>',
     ]
 
-    # 나머지 지표 합계 + 일평균 (메인 컬럼 제외)
+    # 전월 동기간 데이터 추출
+    try:
+        from dateutil.relativedelta import relativedelta
+        curr_dates = [pd.Timestamp(r[0]) for r in filled_rows if r[0] is not None]
+        if curr_dates:
+            c_start = min(curr_dates)
+            c_end   = max(curr_dates)
+            p_start = c_start - relativedelta(months=1)
+            p_end   = c_end   - relativedelta(months=1)
+            prev_filled = [r for r in rows
+                           if r[0] is not None and p_start <= pd.Timestamp(r[0]) <= p_end
+                           and any(r[ci] is not None for ci in col_idx[1:] if ci < len(r))]
+        else:
+            prev_filled = []
+    except Exception:
+        prev_filled = []
+
+    # 나머지 지표 합계 + 일평균 + 전월 대비 (메인 컬럼 제외)
     for i, ci in enumerate(col_idx):
         if ci == 0 or ci == main_col:
             continue
@@ -443,19 +507,73 @@ def _sns_stats_summary(ch: str, data: dict) -> str:
         col_name = tbl_cols[i].replace('\n', ' ')
         total = sum(vals)
         avg   = total / len(vals)
+
+        # 전월 동기간 합계
+        prev_vals = [float(r[ci]) for r in prev_filled if ci < len(r) and r[ci] is not None]
+        mom = _pct_mom(total, sum(prev_vals)) if prev_vals else None
+        mom_html = (f'<div class="stat-sub" style="color:{mom[1]}">전월 {mom[0]}</div>'
+                    if mom else '')
+
         boxes.append(
             f'<div class="stat-box">'
             f'<div class="stat-label">{col_name}</div>'
             f'<div class="stat-val">{_f(total)}</div>'
             f'<div class="stat-sub">일평균 {_f(avg)}</div>'
+            f'{mom_html}'
             f'</div>'
         )
 
     return f'<div class="stats-strip">{"".join(boxes)}</div>'
 
 
-def _sns_channel_detail(ch: str, data: dict) -> str:
-    """채널 1개 — 통계 요약 + 트렌드 차트 + 전체 데이터 테이블 (+ 광고 성과)"""
+def _sns_mini_svg_from_pairs(valid_pairs, n, color):
+    """(index, value) 쌍 목록으로 미니 라인 차트 SVG 생성"""
+    if len(valid_pairs) < 2:
+        return ''
+    W, H = 700, 120
+    PL, PR, PT, PB = 10, 10, 20, 20
+    cw, ch_h = W-PL-PR, H-PT-PB
+    vmin = min(v for _, v in valid_pairs)
+    vmax = max(v for _, v in valid_pairs)
+    rng  = vmax - vmin or 1
+    def px(i): return PL + (i/(n-1))*cw if n > 1 else PL+cw/2
+    def py(v): return PT + (1-(v-vmin)/rng)*ch_h
+    pts      = ' '.join(f'{px(i):.1f},{py(v):.1f}' for i,v in valid_pairs)
+    area_pts = f'{px(valid_pairs[0][0]):.1f},{PT+ch_h:.1f} {pts} {px(valid_pairs[-1][0]):.1f},{PT+ch_h:.1f}'
+    li, lv   = valid_pairs[-1]
+    return (
+        f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;margin-bottom:8px">'
+        f'<rect width="{W}" height="{H}" fill="white"/>'
+        f'<polygon points="{area_pts}" fill="{color}" opacity="0.12"/>'
+        f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linejoin="round"/>'
+        f'<circle cx="{px(li):.1f}" cy="{py(lv):.1f}" r="5" fill="{color}" stroke="white" stroke-width="2"/>'
+        f'<text x="{px(li):.1f}" y="{max(PT+2, py(lv)-8):.1f}" text-anchor="middle" '
+        f'font-size="11" font-weight="bold" fill="{color}">{_f(lv)}</text>'
+        f'</svg>'
+    )
+
+
+def _fmt_sns_cell(ci, v):
+    """SNS 셀 값 포맷"""
+    if v is None:
+        return '-'
+    if ci == 0:
+        try: return pd.Timestamp(v).strftime('%Y-%m-%d')
+        except: return str(v)
+    elif ci == 16:  # CTR(%)
+        try: return f'{float(v):.2f}%'
+        except: return str(v)
+    elif isinstance(v, float) and v == int(v):
+        return f'{int(v):,}'
+    elif isinstance(v, (int, float)):
+        return _f(v)
+    return str(v)
+
+
+def _sns_channel_detail(ch: str, data: dict, block_id: str = 'sns0') -> str:
+    """채널 1개 — 통계 요약 + 트렌드 차트 + 전체 데이터 테이블 (+ 광고 성과)
+    block_id: 일별/주별 토글 DOM ID 구분용
+    """
     meta     = _SNS_META[ch]
     color    = meta['color']
     rows     = data.get('rows', [])
@@ -476,66 +594,104 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
     # ── 값이 입력된 행만 (전체 표시) ──────────
     filled_rows = [r for r in rows if any(r[ci] is not None for ci in col_idx[1:] if ci < len(r))]
     display_rows = filled_rows if filled_rows else rows
+    tbl_hdrs_clean = [h.replace('\n', ' ') for h in tbl_hdrs]
 
-    # ── 트렌드 차트 ──────────────────────────
+    # ── 일별 트렌드 차트 ──────────────────────
     trend_vals = []
     for r in display_rows:
         v = r[main_col] if main_col < len(r) else None
+        try:    trend_vals.append(float(v)) if v is not None else trend_vals.append(None)
+        except: trend_vals.append(None)
+
+    valid_pairs_d = [(i, v) for i, v in enumerate(trend_vals) if v is not None]
+    mini_svg_daily = _sns_mini_svg_from_pairs(valid_pairs_d, len(display_rows), color)
+
+    # ── 일별 테이블 (data-date 속성 → 기간 필터 JS 연동) ─────
+    daily_tbody = ''
+    for i, r in enumerate(reversed(display_rows)):
+        date_str = ''
         try:
-            trend_vals.append(float(v)) if v is not None else trend_vals.append(None)
+            dv = r[col_idx[0]] if col_idx[0] < len(r) else None
+            date_str = pd.Timestamp(dv).strftime('%Y-%m-%d') if dv else ''
         except Exception:
-            trend_vals.append(None)
+            pass
+        stripe = ' class="stripe daily-row"' if i % 2 == 0 else ' class="daily-row"'
+        cells = ''.join(f'<td>{_fmt_sns_cell(ci, r[ci] if ci < len(r) else None)}</td>'
+                        for ci in col_idx)
+        daily_tbody += f'<tr{stripe} data-date="{date_str}">{cells}</tr>'
 
-    valid_pairs = [(i, v) for i, v in enumerate(trend_vals) if v is not None]
-    if len(valid_pairs) >= 2:
-        n   = len(display_rows)
-        W, H = 700, 120
-        PL, PR, PT, PB = 10, 10, 20, 20
-        cw, ch_h = W-PL-PR, H-PT-PB
-        vmin = min(v for _, v in valid_pairs)
-        vmax = max(v for _, v in valid_pairs)
-        rng  = vmax - vmin or 1
-        def px(i): return PL + (i/(n-1))*cw if n > 1 else PL+cw/2
-        def py(v): return PT + (1-(v-vmin)/rng)*ch_h
-        pts      = ' '.join(f'{px(i):.1f},{py(v):.1f}' for i,v in valid_pairs)
-        area_pts = f'{px(valid_pairs[0][0]):.1f},{PT+ch_h:.1f} {pts} {px(valid_pairs[-1][0]):.1f},{PT+ch_h:.1f}'
-        li, lv   = valid_pairs[-1]
-        mini_svg = (
-            f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;margin-bottom:8px">'
-            f'<rect width="{W}" height="{H}" fill="white"/>'
-            f'<polygon points="{area_pts}" fill="{color}" opacity="0.12"/>'
-            f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linejoin="round"/>'
-            f'<circle cx="{px(li):.1f}" cy="{py(lv):.1f}" r="5" fill="{color}" stroke="white" stroke-width="2"/>'
-            f'<text x="{px(li):.1f}" y="{max(PT+2, py(lv)-8):.1f}" text-anchor="middle" '
-            f'font-size="11" font-weight="bold" fill="{color}">{_f(lv)}</text>'
-            f'</svg>'
-        )
-    else:
-        mini_svg = ''
-
-    # ── 전체 데이터 테이블 (스크롤) ───────────
-    tbl_rows = []
-    for r in reversed(display_rows):
-        tbl_row = []
-        for ci in col_idx:
-            v = r[ci] if ci < len(r) else None
-            if ci == 0 and v is not None:
-                try:    tbl_row.append(pd.Timestamp(v).strftime('%Y-%m-%d'))
-                except: tbl_row.append(str(v))
-            elif isinstance(v, float) and v == int(v):
-                tbl_row.append(f'{int(v):,}')
-            elif isinstance(v, (int, float)):
-                tbl_row.append(_f(v))
-            else:
-                tbl_row.append(str(v) if v is not None else '-')
-        tbl_rows.append(tbl_row)
-
-    tbl_hdrs_clean = [h.replace('\n', ' ') for h in tbl_hdrs]
-    tbl_html = (
+    daily_tbl_html = (
         f'<div style="max-height:360px;overflow-y:auto;border-radius:6px">'
-        f'{_table_html(tbl_hdrs_clean, tbl_rows)}'
-        f'</div>'
+        f'<table><thead><tr>'
+        + ''.join(f'<th>{h}</th>' for h in tbl_hdrs_clean)
+        + f'</tr></thead><tbody>{daily_tbody}</tbody></table></div>'
     )
+
+    # ── 주별 집계 ─────────────────────────────
+    weekly_svg = ''
+    weekly_tbl_html = '<div style="color:#aaa;font-size:12px;padding:12px">주별 집계 데이터가 없습니다.</div>'
+    try:
+        df_sns = pd.DataFrame([
+            {f'c{ci}': (r[ci] if ci < len(r) else None) for ci in col_idx}
+            | {'_date': pd.Timestamp(r[col_idx[0]]) if r[col_idx[0]] else pd.NaT}
+            for r in display_rows
+        ]).dropna(subset=['_date'])
+        df_sns['_week'] = df_sns['_date'].dt.to_period('W')
+
+        agg_dict = {}
+        for ci in col_idx[1:]:
+            agg_dict[f'c{ci}'] = 'last' if ci == main_col else 'sum'
+
+        weekly = df_sns.groupby('_week', as_index=False).agg(agg_dict)
+        weekly['_wstr'] = weekly['_week'].apply(
+            lambda p: f"{p.start_time.strftime('%m/%d')}~{p.end_time.strftime('%m/%d')}"
+        )
+
+        # 주별 차트
+        w_vals = [float(wr[f'c{main_col}']) if pd.notna(wr[f'c{main_col}']) else None
+                  for _, wr in weekly.iterrows()]
+        w_valid = [(i, v) for i, v in enumerate(w_vals) if v is not None]
+        weekly_svg = _sns_mini_svg_from_pairs(w_valid, len(weekly), color)
+
+        # 주별 테이블
+        w_hdrs = ['주간'] + tbl_hdrs_clean[1:]
+        w_tbody = ''
+        for i, (_, wr) in enumerate(weekly.iterrows()):
+            stripe = ' class="stripe"' if i % 2 == 0 else ''
+            cells = f'<td>{wr["_wstr"]}</td>'
+            for ci in col_idx[1:]:
+                v = wr.get(f'c{ci}')
+                cells += f'<td>{_f(v) if pd.notna(v) else "-"}</td>'
+            w_tbody += f'<tr{stripe}>{cells}</tr>'
+
+        weekly_tbl_html = (
+            f'<div style="max-height:360px;overflow-y:auto;border-radius:6px">'
+            f'<table><thead><tr>'
+            + ''.join(f'<th>{h}</th>' for h in w_hdrs)
+            + f'</tr></thead><tbody>{w_tbody}</tbody></table></div>'
+        )
+    except Exception:
+        pass
+
+    # ── 집계 토글 + 조합 ─────────────────────
+    tbl_section = f'''
+<div class="aggr-toggle">
+  <button class="aggr-btn aggr-active" id="aggr-daily-{block_id}"
+    onclick="setAggr('{block_id}','daily')">일별</button>
+  <button class="aggr-btn" id="aggr-weekly-{block_id}"
+    onclick="setAggr('{block_id}','weekly')">주별</button>
+</div>
+<div id="daily-view-{block_id}">
+  {mini_svg_daily}
+  <div class="sub-title">일별 데이터</div>
+  {daily_tbl_html}
+</div>
+<div id="weekly-view-{block_id}" style="display:none">
+  {weekly_svg}
+  <div class="sub-title">주별 데이터</div>
+  {weekly_tbl_html}
+</div>
+'''
 
     # ── 인스타그램 광고 성과 (있는 경우) ──────
     ad_html = ''
@@ -547,21 +703,9 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
         if ad_filled:
             ad_tbl_rows = []
             for r in reversed(ad_filled):
-                ad_row = []
-                for ci in ad_col_idx:
-                    v = r[ci] if ci < len(r) else None
-                    if ci == 0 and v is not None:
-                        try:    ad_row.append(pd.Timestamp(v).strftime('%Y-%m-%d'))
-                        except: ad_row.append(str(v))
-                    elif ci == 16 and v is not None:  # CTR(%)
-                        try:    ad_row.append(f'{float(v):.2f}%')
-                        except: ad_row.append(str(v))
-                    elif isinstance(v, (int, float)):
-                        ad_row.append(_f(v))
-                    else:
-                        ad_row.append(str(v) if v is not None else '-')
+                ad_row = [_fmt_sns_cell(ci, r[ci] if ci < len(r) else None)
+                          for ci in ad_col_idx]
                 ad_tbl_rows.append(ad_row)
-
             ad_hdrs_clean = [h.replace('\n', ' ') for h in ad_tbl_cols]
             ad_html = (
                 f'<div style="margin-top:20px">'
@@ -580,7 +724,7 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
                 f'</div>'
             )
 
-    return stats_html + mini_svg + tbl_html + ad_html
+    return stats_html + tbl_section + ad_html
 
 
 def _build_sns_section(sns_path: str) -> str:
@@ -614,7 +758,8 @@ def _build_sns_section(sns_path: str) -> str:
         filled = sum(1 for r in rows if ci1 < len(r) and r[ci1] is not None)
         badge = f'<span class="sns-badge">{filled}일 입력</span>' if filled else \
                 '<span class="sns-badge sns-badge-empty">미입력</span>'
-        detail = _sns_channel_detail(ch, data)
+        sns_block_id = f'sns{i}'
+        detail = _sns_channel_detail(ch, data, block_id=sns_block_id)
         channel_panels += (
             f'<div id="sns-p-{i}" class="sns-panel" style="display:none">'
             f'<div class="sns-ch-header" style="background:{color};border-radius:8px;margin-bottom:14px">'
@@ -643,7 +788,7 @@ def _build_sns_section(sns_path: str) -> str:
 
 def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                       period_label='', output_path='report.html',
-                      sns_tracker_path=None):
+                      sns_tracker_path=None, prev_raw_df=None):
 
     sa_cd = _cd(sa_conv_df)
     da_cd = _cd(da_conv_df)
@@ -674,14 +819,31 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     sa_버튼전환    = sum(sa_cd.values()) - sa_cd.get('페이지조회', 0)
     da_버튼전환    = sum(da_cd.values()) - da_cd.get('페이지조회', 0)
 
+    # ── 전월 동기간 집계 ───────────────────
+    p_노출 = p_클릭 = p_비용 = p_naver = p_gsa = p_gda = 0
+    has_prev = prev_raw_df is not None and not prev_raw_df.empty
+    if has_prev:
+        p_노출   = prev_raw_df['노출'].sum()
+        p_클릭   = prev_raw_df['클릭'].sum()
+        p_비용   = prev_raw_df['비용'].sum()
+        p_naver  = prev_raw_df[prev_raw_df['매체'].str.startswith('Naver')]['클릭'].sum()
+        p_gsa    = prev_raw_df[prev_raw_df['매체'] == 'Google_SA']['클릭'].sum()
+        p_gda    = prev_raw_df[prev_raw_df['매체'] == 'Google_DA']['클릭'].sum()
+
     # ── KPI 카드 ───────────────────────────
     kpi_html = (
-        _kpi_card('전체 노출', _f(total_노출), '기간 합계', C_NAVY) +
-        _kpi_card('전체 클릭', _f(total_클릭), f'CTR {_fp(total_클릭, total_노출)}', C_GOOGLE) +
-        _kpi_card('전체 광고비', f'₩{_f(total_비용)}', f'CPC ₩{_f(total_비용/total_클릭 if total_클릭 else 0)}', C_DA) +
-        _kpi_card('네이버 클릭', _f(naver_클릭), f'전체 클릭비중 {_fp(naver_클릭, total_클릭)}', C_NAVER) +
-        _kpi_card('구글 SA 클릭', _f(gsa_클릭), f'전체 클릭비중 {_fp(gsa_클릭, total_클릭)}', C_GOOGLE) +
-        _kpi_card('구글 DA 클릭', _f(gda_클릭), f'전체 클릭비중 {_fp(gda_클릭, total_클릭)}', C_DA)
+        _kpi_card('전체 노출', _f(total_노출), '기간 합계', C_NAVY,
+                  mom=_pct_mom(total_노출, p_노출) if has_prev else None) +
+        _kpi_card('전체 클릭', _f(total_클릭), f'CTR {_fp(total_클릭, total_노출)}', C_GOOGLE,
+                  mom=_pct_mom(total_클릭, p_클릭) if has_prev else None) +
+        _kpi_card('전체 광고비', f'₩{_f(total_비용)}', f'CPC ₩{_f(total_비용/total_클릭 if total_클릭 else 0)}', C_DA,
+                  mom=_pct_mom(total_비용, p_비용) if has_prev else None) +
+        _kpi_card('네이버 클릭', _f(naver_클릭), f'전체 클릭비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,
+                  mom=_pct_mom(naver_클릭, p_naver) if has_prev else None) +
+        _kpi_card('구글 SA 클릭', _f(gsa_클릭), f'전체 클릭비중 {_fp(gsa_클릭, total_클릭)}', C_GOOGLE,
+                  mom=_pct_mom(gsa_클릭, p_gsa) if has_prev else None) +
+        _kpi_card('구글 DA 클릭', _f(gda_클릭), f'전체 클릭비중 {_fp(gda_클릭, total_클릭)}', C_DA,
+                  mom=_pct_mom(gda_클릭, p_gda) if has_prev else None)
     )
     kpi_section = f'<div class="kpi-grid">{kpi_html}</div>'
 
@@ -741,39 +903,108 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         f'</div>'
     )
 
-    # ── 매체별 일별 트렌드 ─────────────────
-    def _daily_block(df, media_label, color):
+    # ── 매체별 일별/주별 트렌드 ───────────────
+    def _daily_block(df, media_label, color, block_id='block'):
         if df.empty: return ''
+
+        # ── 일별 집계 ──
         daily = df.groupby('날짜', as_index=False).agg(
             노출=('노출','sum'), 클릭=('클릭','sum'), 비용=('비용','sum')
         ).sort_values('날짜')
-        daily['날짜'] = pd.to_datetime(daily['날짜']).dt.strftime('%Y-%m-%d')
-        dates  = list(daily['날짜'])
+        daily['날짜_str'] = pd.to_datetime(daily['날짜']).dt.strftime('%Y-%m-%d')
+        dates  = list(daily['날짜_str'])
         clicks = [float(v) for v in daily['클릭']]
         costs  = [float(v) for v in daily['비용']]
 
-        svg_c = _svg_line(dates, clicks, color, title='일별 클릭수 추이')
-        svg_v = _svg_line(dates, costs,  color, title='일별 비용 추이')
+        svg_c_d = _svg_line(dates, clicks, color, title='일별 클릭수 추이')
+        svg_v_d = _svg_line(dates, costs,  color, title='일별 비용 추이')
 
-        # 일별 테이블
-        rows = []
-        for _, r in daily.iterrows():
+        # 일별 테이블 (data-date 속성 포함 → JS 기간 필터용)
+        daily_rows_html = ''
+        for i, r in daily.iterrows():
             클릭 = float(r['클릭']); 노출 = float(r['노출']); 비용 = float(r['비용'])
-            rows.append([r['날짜'], _f(노출), _f(클릭), _fp(클릭, 노출),
-                         f'₩{_f(비용/클릭 if 클릭 else 0)}', f'₩{_f(비용)}'])
-        tbl = _table_html(['날짜','노출','클릭','CTR','CPC','비용'], rows)
-
-        return (
-            f'<div class="chart-row">'
-            f'<div class="chart-item">{_chart_block("일별 클릭수 추이", svg_c)}</div>'
-            f'<div class="chart-item">{_chart_block("일별 비용 추이", svg_v)}</div>'
-            f'</div>'
-            f'<div class="sub-title">일별 성과 상세</div>{tbl}'
+            stripe = ' class="stripe"' if i % 2 == 0 else ''
+            daily_rows_html += (
+                f'<tr class="daily-row"{stripe} data-date="{r["날짜_str"]}">'
+                f'<td>{r["날짜_str"]}</td>'
+                f'<td>{_f(노출)}</td><td>{_f(클릭)}</td>'
+                f'<td class="pct">{_fp(클릭, 노출)}</td>'
+                f'<td>₩{_f(비용/클릭 if 클릭 else 0)}</td>'
+                f'<td>₩{_f(비용)}</td>'
+                f'</tr>'
+            )
+        daily_tbl = (
+            f'<div style="overflow-x:auto">'
+            f'<table><thead><tr>'
+            f'<th>날짜</th><th>노출</th><th>클릭</th><th>CTR</th><th>CPC</th><th>비용</th>'
+            f'</tr></thead><tbody>{daily_rows_html}</tbody></table></div>'
         )
 
-    naver_content  = _daily_block(naver_df,  '네이버 SA',  C_NAVER)
-    gsa_content    = _daily_block(gsa_df,    '구글 SA',    C_GOOGLE)
-    gda_content    = _daily_block(gda_df,    '구글 DA',    C_DA)
+        # ── 주별 집계 ──
+        df2 = df.copy()
+        df2['날짜'] = pd.to_datetime(df2['날짜'])
+        df2['주'] = df2['날짜'].dt.to_period('W')
+        weekly = df2.groupby('주', as_index=False).agg(
+            노출=('노출','sum'), 클릭=('클릭','sum'), 비용=('비용','sum')
+        ).sort_values('주')
+        weekly['주_str'] = weekly['주'].apply(
+            lambda p: f"{p.start_time.strftime('%m/%d')}~{p.end_time.strftime('%m/%d')}"
+        )
+        w_dates  = list(weekly['주_str'])
+        w_clicks = [float(v) for v in weekly['클릭']]
+        w_costs  = [float(v) for v in weekly['비용']]
+
+        svg_c_w = _svg_line(w_dates, w_clicks, color, title='주별 클릭수 추이')
+        svg_v_w = _svg_line(w_dates, w_costs,  color, title='주별 비용 추이')
+
+        weekly_rows_html = ''
+        for i, r in weekly.iterrows():
+            클릭 = float(r['클릭']); 노출 = float(r['노출']); 비용 = float(r['비용'])
+            stripe = ' class="stripe"' if i % 2 == 0 else ''
+            weekly_rows_html += (
+                f'<tr{stripe}>'
+                f'<td>{r["주_str"]}</td>'
+                f'<td>{_f(노출)}</td><td>{_f(클릭)}</td>'
+                f'<td class="pct">{_fp(클릭, 노출)}</td>'
+                f'<td>₩{_f(비용/클릭 if 클릭 else 0)}</td>'
+                f'<td>₩{_f(비용)}</td>'
+                f'</tr>'
+            )
+        weekly_tbl = (
+            f'<div style="overflow-x:auto">'
+            f'<table><thead><tr>'
+            f'<th>주간</th><th>노출</th><th>클릭</th><th>CTR</th><th>CPC</th><th>비용</th>'
+            f'</tr></thead><tbody>{weekly_rows_html}</tbody></table></div>'
+        )
+
+        return f'''
+<div class="aggr-toggle">
+  <button class="aggr-btn aggr-active" id="aggr-daily-{block_id}"
+    onclick="setAggr('{block_id}','daily')">일별</button>
+  <button class="aggr-btn" id="aggr-weekly-{block_id}"
+    onclick="setAggr('{block_id}','weekly')">주별</button>
+</div>
+<div id="daily-view-{block_id}">
+  <div class="chart-row">
+    <div class="chart-item">{_chart_block("일별 클릭수 추이", svg_c_d)}</div>
+    <div class="chart-item">{_chart_block("일별 비용 추이", svg_v_d)}</div>
+  </div>
+  <div class="sub-title">일별 성과 상세</div>
+  {daily_tbl}
+</div>
+<div id="weekly-view-{block_id}" style="display:none">
+  <div class="chart-row">
+    <div class="chart-item">{_chart_block("주별 클릭수 추이", svg_c_w)}</div>
+    <div class="chart-item">{_chart_block("주별 비용 추이", svg_v_w)}</div>
+  </div>
+  <div class="sub-title">주별 성과 상세</div>
+  {weekly_tbl}
+</div>
+'''
+
+    naver_content  = _daily_block(naver_df,  '네이버 SA',  C_NAVER,  'naver')
+    gsa_content    = _daily_block(gsa_df,    '구글 SA',    C_GOOGLE, 'gsa')
+    gda_content    = _daily_block(gda_df,    '구글 DA',    C_DA,     'gda')
 
     # 네이버 버튼 전환 블록 (총 전환수 기준)
     naver_conv_html = (
@@ -849,6 +1080,8 @@ body {{
 .kpi-label {{ font-size: 11px; color: {C_MUTED}; font-weight: 500; margin-bottom: 6px; }}
 .kpi-value {{ font-size: 20px; font-weight: 700; }}
 .kpi-sub {{ font-size: 11px; color: {C_MUTED}; margin-top: 4px; }}
+.kpi-mom {{ font-size: 11px; font-weight: 700; margin-top: 6px; padding: 3px 8px;
+    background: #F8FAFC; border-radius: 12px; display: inline-block; }}
 
 /* 섹션 */
 .section {{ background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
@@ -909,6 +1142,28 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 .stat-val {{ font-size:15px; font-weight:800; color:{C_TEXT}; }}
 .stat-sub {{ font-size:10px; color:{C_MUTED}; margin-top:2px; }}
 
+/* 기간 필터 바 */
+.period-bar {{ display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    background:white; padding:10px 16px; border-radius:8px;
+    box-shadow:0 1px 4px rgba(0,0,0,.08); margin-bottom:4px; }}
+.period-label {{ font-size:12px; font-weight:600; color:{C_MUTED}; margin-right:4px; }}
+.period-btn {{ padding:5px 16px; border-radius:15px;
+    border:1.5px solid {C_BORDER}; background:white;
+    color:{C_MUTED}; font-size:12px; font-weight:600; cursor:pointer;
+    transition:all .15s; font-family:inherit; }}
+.period-btn:hover {{ border-color:{C_NAVY}; color:{C_NAVY}; }}
+.period-active {{ background:{C_NAVY} !important; color:white !important;
+    border-color:{C_NAVY} !important; }}
+/* 집계 토글 */
+.aggr-toggle {{ display:flex; gap:6px; margin-bottom:10px; }}
+.aggr-btn {{ padding:5px 16px; border-radius:15px;
+    border:1.5px solid {C_BORDER}; background:white;
+    color:{C_MUTED}; font-size:12px; font-weight:600; cursor:pointer;
+    transition:all .15s; font-family:inherit; }}
+.aggr-btn:hover {{ border-color:{C_NAVY}; color:{C_NAVY}; }}
+.aggr-active {{ background:{C_NAVY} !important; color:white !important;
+    border-color:{C_NAVY} !important; }}
+
 /* 반응형 */
 @media (max-width: 900px) {{
     .kpi-grid {{ grid-template-columns: repeat(3,1fr); }}
@@ -943,6 +1198,13 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 
   {_section('🔍 전체 매체 비교', C_NAVY, compare_content)}
 
+  <div class="period-bar">
+    <span class="period-label">📅 기간 필터</span>
+    <button class="period-btn" onclick="setPeriod(this,7)">최근 7일</button>
+    <button class="period-btn" onclick="setPeriod(this,14)">최근 14일</button>
+    <button class="period-btn period-active" onclick="setPeriod(this,0)">전체</button>
+  </div>
+
   {_section('🟢 네이버 SA', C_NAVER, naver_content + naver_conv_html)}
 
   {_section('🔵 구글 SA (검색)', C_GOOGLE, gsa_content + sa_conv_content)}
@@ -958,6 +1220,48 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
   )}
 
 </div>
+
+<script>
+/* ── 집계 토글: 일별 ↔ 주별 ── */
+function setAggr(blockId, aggr) {{
+  document.getElementById('daily-view-'  + blockId).style.display = aggr === 'daily'  ? '' : 'none';
+  document.getElementById('weekly-view-' + blockId).style.display = aggr === 'weekly' ? '' : 'none';
+  document.getElementById('aggr-daily-'  + blockId).className = 'aggr-btn' + (aggr === 'daily'  ? ' aggr-active' : '');
+  document.getElementById('aggr-weekly-' + blockId).className = 'aggr-btn' + (aggr === 'weekly' ? ' aggr-active' : '');
+  /* 기간 필터 재적용 */
+  applyPeriod(_activeDays);
+}}
+
+/* ── 기간 필터: 최근 N일 (0 = 전체) ── */
+var _activeDays = 0;
+function setPeriod(btn, days) {{
+  _activeDays = days;
+  document.querySelectorAll('.period-btn').forEach(function(b) {{
+    b.classList.remove('period-active');
+  }});
+  btn.classList.add('period-active');
+  applyPeriod(days);
+}}
+
+function applyPeriod(days) {{
+  var rows = document.querySelectorAll('.daily-row');
+  if (days === 0) {{
+    rows.forEach(function(r) {{ r.style.display = ''; }});
+    return;
+  }}
+  /* 전체 날짜 목록에서 최신 N개의 cutoff 날짜 계산 */
+  var allDates = [];
+  rows.forEach(function(r) {{
+    var d = r.getAttribute('data-date');
+    if (d && allDates.indexOf(d) === -1) allDates.push(d);
+  }});
+  allDates.sort();
+  var cutoff = allDates.length > days ? allDates[allDates.length - days] : (allDates[0] || '');
+  rows.forEach(function(r) {{
+    r.style.display = (r.getAttribute('data-date') >= cutoff) ? '' : 'none';
+  }});
+}}
+</script>
 </body>
 </html>"""
 
