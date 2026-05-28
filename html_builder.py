@@ -273,9 +273,11 @@ def _chart_block(title, svg):
 _SNS_META = {
     '📱 인스타그램': {
         'color': '#E1306C', 'emoji': '📱',
-        'table_cols': ['날짜', '팔로워수', '게시물수\n(당일)', '좋아요수', '댓글수', '도달수'],
-        'col_idx':    [0,      1,           3,                  5,         6,        7],
+        'table_cols': ['날짜', '팔로워수', '게시물수(당일)', '좋아요수', '댓글수', '도달수'],
+        'col_idx':    [0,      1,           3,               5,         6,        7],
         'main_col': 1,  # 팔로워수
+        'ad_table_cols': ['날짜', '광고비(원)', '광고노출수', '광고클릭수', '광고도달수', '전환수', 'CTR(%)', 'CPC(원)', 'CPM(원)'],
+        'ad_col_idx':    [0,      11,           12,           13,           14,           15,       16,       17,       18],
     },
     '🧵 쓰레드': {
         'color': '#444444', 'emoji': '🧵',
@@ -320,16 +322,19 @@ def _read_sns_channel_data(sns_path: str) -> dict:
             if ch not in wb.sheetnames:
                 continue
             ws = wb[ch]
-            # 헤더 row4
-            raw_hdrs = [ws.cell(4, c).value for c in range(1, 12)]
+            # 헤더 row4 (인스타그램은 광고 컬럼까지)
+            max_col = 19 if ch == '📱 인스타그램' else 11
+            raw_hdrs = [ws.cell(4, c).value for c in range(1, max_col + 1)]
             headers  = [str(h).replace('\n', '') if h else '' for h in raw_hdrs]
             # 데이터 row5~94: 날짜(col A)가 있는 행만
+            # 인스타그램은 광고 컬럼(L~S)까지 읽음
+            max_col = 19 if ch == '📱 인스타그램' else 11
             rows = []
             for r in range(5, 95):
                 date_val = ws.cell(r, 1).value
                 if date_val is None:
                     continue
-                row_vals = [ws.cell(r, c).value for c in range(1, 12)]
+                row_vals = [ws.cell(r, c).value for c in range(1, max_col + 1)]
                 rows.append(row_vals)
             result[ch] = {'headers': headers, 'rows': rows}
     except Exception:
@@ -381,41 +386,109 @@ def _sns_summary_cards(channel_data: dict) -> str:
     return f'<div class="sns-kpi-grid">{cards}</div>'
 
 
+def _sns_stats_summary(ch: str, data: dict) -> str:
+    """채널 기간 통계 (누적 합계 / 일평균) 요약 스트립"""
+    meta     = _SNS_META[ch]
+    rows     = data.get('rows', [])
+    col_idx  = meta['col_idx']
+    tbl_cols = meta['table_cols']
+    main_col = meta['main_col']
+    color    = meta['color']
+
+    if not rows:
+        return ''
+
+    filled_rows = [r for r in rows if any(r[ci] is not None for ci in col_idx[1:] if ci < len(r))]
+    if not filled_rows:
+        return ''
+
+    # 기간
+    try:
+        first_date = pd.Timestamp(filled_rows[0][0]).strftime('%m/%d')
+        last_date  = pd.Timestamp(filled_rows[-1][0]).strftime('%m/%d')
+        period_str = f'{first_date} ~ {last_date} ({len(filled_rows)}일)'
+    except Exception:
+        period_str = f'{len(filled_rows)}일'
+
+    # 메인 지표 증감 (첫 입력값 → 최신값)
+    main_vals = [r for r in rows if main_col < len(r) and r[main_col] is not None]
+    if len(main_vals) >= 2:
+        try:
+            diff = float(main_vals[-1][main_col]) - float(main_vals[0][main_col])
+            sign = '+' if diff >= 0 else ''
+            growth_str  = f'{sign}{_f(diff)}'
+            growth_color = '#16A34A' if diff >= 0 else '#DC2626'
+        except Exception:
+            growth_str, growth_color = '-', C_MUTED
+    else:
+        growth_str, growth_color = '-', C_MUTED
+
+    main_label = tbl_cols[col_idx.index(main_col)].replace('\n', '')
+
+    boxes = [
+        f'<div class="stat-box"><div class="stat-label">집계 기간</div>'
+        f'<div class="stat-val">{period_str}</div></div>',
+        f'<div class="stat-box"><div class="stat-label">{main_label} 증감</div>'
+        f'<div class="stat-val" style="color:{growth_color}">{growth_str}</div>'
+        f'<div class="stat-sub">(기간 첫날 대비)</div></div>',
+    ]
+
+    # 나머지 지표 합계 + 일평균 (메인 컬럼 제외)
+    for i, ci in enumerate(col_idx):
+        if ci == 0 or ci == main_col:
+            continue
+        vals = [float(r[ci]) for r in rows if ci < len(r) and r[ci] is not None]
+        if not vals:
+            continue
+        col_name = tbl_cols[i].replace('\n', ' ')
+        total = sum(vals)
+        avg   = total / len(vals)
+        boxes.append(
+            f'<div class="stat-box">'
+            f'<div class="stat-label">{col_name}</div>'
+            f'<div class="stat-val">{_f(total)}</div>'
+            f'<div class="stat-sub">일평균 {_f(avg)}</div>'
+            f'</div>'
+        )
+
+    return f'<div class="stats-strip">{"".join(boxes)}</div>'
+
+
 def _sns_channel_detail(ch: str, data: dict) -> str:
-    """채널 1개의 최근 데이터 테이블 + 미니 트렌드 차트"""
-    meta    = _SNS_META[ch]
-    color   = meta['color']
-    rows    = data.get('rows', [])
-    headers = data.get('headers', [])
-    col_idx = meta['col_idx']
+    """채널 1개 — 통계 요약 + 트렌드 차트 + 전체 데이터 테이블 (+ 광고 성과)"""
+    meta     = _SNS_META[ch]
+    color    = meta['color']
+    rows     = data.get('rows', [])
+    col_idx  = meta['col_idx']
     tbl_hdrs = meta['table_cols']
     main_col = meta['main_col']
 
     if not rows:
-        placeholder = (
+        return (
             f'<div style="text-align:center;padding:20px;color:{C_MUTED};font-size:12px">'
             f'아직 데이터가 입력되지 않았습니다.<br>'
             f'<b>SNS_채널_관리대장.xlsx</b> 의 {ch} 탭에 날짜와 수치를 입력하세요.</div>'
         )
-        return placeholder
 
-    # 값이 입력된 행만 필터링 후 최근 14일치 표시
-    filled_rows = [r for r in rows if any(r[ci] is not None for ci in col_idx[1:])]
-    recent = filled_rows[-14:] if filled_rows else rows[-14:]
+    # ── 통계 요약 ────────────────────────────
+    stats_html = _sns_stats_summary(ch, data)
 
-    # 미니 트렌드 SVG (메인 지표)
+    # ── 값이 입력된 행만 (전체 표시) ──────────
+    filled_rows = [r for r in rows if any(r[ci] is not None for ci in col_idx[1:] if ci < len(r))]
+    display_rows = filled_rows if filled_rows else rows
+
+    # ── 트렌드 차트 ──────────────────────────
     trend_vals = []
-    for r in recent:
+    for r in display_rows:
         v = r[main_col] if main_col < len(r) else None
         try:
             trend_vals.append(float(v)) if v is not None else trend_vals.append(None)
         except Exception:
             trend_vals.append(None)
 
-    # None 값을 건너뛰고 유효 데이터만
     valid_pairs = [(i, v) for i, v in enumerate(trend_vals) if v is not None]
     if len(valid_pairs) >= 2:
-        n = len(recent)
+        n   = len(display_rows)
         W, H = 700, 120
         PL, PR, PT, PB = 10, 10, 20, 20
         cw, ch_h = W-PL-PR, H-PT-PB
@@ -424,12 +497,9 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
         rng  = vmax - vmin or 1
         def px(i): return PL + (i/(n-1))*cw if n > 1 else PL+cw/2
         def py(v): return PT + (1-(v-vmin)/rng)*ch_h
-        pts = ' '.join(f'{px(i):.1f},{py(v):.1f}' for i,v in valid_pairs)
-        area_pts = f'{px(valid_pairs[0][0]):.1f},{PT+ch_h:.1f} '
-        area_pts += pts
-        area_pts += f' {px(valid_pairs[-1][0]):.1f},{PT+ch_h:.1f}'
-        # 최신값 레이블
-        li, lv = valid_pairs[-1]
+        pts      = ' '.join(f'{px(i):.1f},{py(v):.1f}' for i,v in valid_pairs)
+        area_pts = f'{px(valid_pairs[0][0]):.1f},{PT+ch_h:.1f} {pts} {px(valid_pairs[-1][0]):.1f},{PT+ch_h:.1f}'
+        li, lv   = valid_pairs[-1]
         mini_svg = (
             f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;margin-bottom:8px">'
             f'<rect width="{W}" height="{H}" fill="white"/>'
@@ -443,17 +513,15 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
     else:
         mini_svg = ''
 
-    # 테이블
+    # ── 전체 데이터 테이블 (스크롤) ───────────
     tbl_rows = []
-    for r in reversed(recent):  # 최신순
+    for r in reversed(display_rows):
         tbl_row = []
         for ci in col_idx:
             v = r[ci] if ci < len(r) else None
-            if ci == 0 and v is not None:  # 날짜
-                try:
-                    tbl_row.append(pd.Timestamp(v).strftime('%Y-%m-%d'))
-                except Exception:
-                    tbl_row.append(str(v))
+            if ci == 0 and v is not None:
+                try:    tbl_row.append(pd.Timestamp(v).strftime('%Y-%m-%d'))
+                except: tbl_row.append(str(v))
             elif isinstance(v, float) and v == int(v):
                 tbl_row.append(f'{int(v):,}')
             elif isinstance(v, (int, float)):
@@ -463,40 +531,110 @@ def _sns_channel_detail(ch: str, data: dict) -> str:
         tbl_rows.append(tbl_row)
 
     tbl_hdrs_clean = [h.replace('\n', ' ') for h in tbl_hdrs]
-    tbl_html = _table_html(tbl_hdrs_clean, tbl_rows)
+    tbl_html = (
+        f'<div style="max-height:360px;overflow-y:auto;border-radius:6px">'
+        f'{_table_html(tbl_hdrs_clean, tbl_rows)}'
+        f'</div>'
+    )
 
-    return mini_svg + tbl_html
+    # ── 인스타그램 광고 성과 (있는 경우) ──────
+    ad_html = ''
+    if 'ad_col_idx' in meta:
+        ad_col_idx  = meta['ad_col_idx']
+        ad_tbl_cols = meta['ad_table_cols']
+        ad_filled   = [r for r in rows if len(r) > 11 and
+                       any(r[ci] is not None for ci in ad_col_idx[1:] if ci < len(r))]
+        if ad_filled:
+            ad_tbl_rows = []
+            for r in reversed(ad_filled):
+                ad_row = []
+                for ci in ad_col_idx:
+                    v = r[ci] if ci < len(r) else None
+                    if ci == 0 and v is not None:
+                        try:    ad_row.append(pd.Timestamp(v).strftime('%Y-%m-%d'))
+                        except: ad_row.append(str(v))
+                    elif ci == 16 and v is not None:  # CTR(%)
+                        try:    ad_row.append(f'{float(v):.2f}%')
+                        except: ad_row.append(str(v))
+                    elif isinstance(v, (int, float)):
+                        ad_row.append(_f(v))
+                    else:
+                        ad_row.append(str(v) if v is not None else '-')
+                ad_tbl_rows.append(ad_row)
+
+            ad_hdrs_clean = [h.replace('\n', ' ') for h in ad_tbl_cols]
+            ad_html = (
+                f'<div style="margin-top:20px">'
+                f'<div style="font-size:13px;font-weight:700;color:{color};'
+                f'margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #FCE4EC">'
+                f'📢 광고 성과</div>'
+                f'<div style="max-height:300px;overflow-y:auto;border-radius:6px">'
+                f'{_table_html(ad_hdrs_clean, ad_tbl_rows)}'
+                f'</div></div>'
+            )
+        else:
+            ad_html = (
+                f'<div style="margin-top:20px;padding:14px;background:#FFF5F7;'
+                f'border-radius:8px;border:1px dashed #F48FB1;font-size:12px;color:{C_MUTED}">'
+                f'📢 <b>광고 성과</b> — SNS 관리대장 인스타그램 탭의 L~S열에 광고 데이터를 입력하면 여기에 표시됩니다.'
+                f'</div>'
+            )
+
+    return stats_html + mini_svg + tbl_html + ad_html
 
 
 def _build_sns_section(sns_path: str) -> str:
-    """SNS 전체 섹션 HTML 반환"""
+    """SNS 전체 섹션 HTML — 탭 UI (전체요약 + 채널별 상세)"""
     channel_data = _read_sns_channel_data(sns_path)
 
-    # 요약 카드
-    summary_html = _sns_summary_cards(channel_data)
+    # ── 탭 바 ────────────────────────────────
+    tab_bar = '<div class="sns-tab-bar">'
+    tab_bar += '<button class="sns-tab sns-tab-active" onclick="snsTab(this,\'sns-p-all\')">📊 전체 요약</button>'
+    for i, ch in enumerate(_SNS_CHANNEL_ORDER):
+        meta  = _SNS_META[ch]
+        data  = channel_data.get(ch, {})
+        rows  = data.get('rows', [])
+        ci1   = meta['col_idx'][1]
+        filled = sum(1 for r in rows if ci1 < len(r) and r[ci1] is not None)
+        badge = f'<span class="sns-tab-badge">{filled}일</span>' if filled else ''
+        tab_bar += f'<button class="sns-tab" onclick="snsTab(this,\'sns-p-{i}\')">{meta["emoji"]} {ch[2:].strip()}{badge}</button>'
+    tab_bar += '</div>'
 
-    # 채널별 상세 (2열 그리드)
-    detail_html = '<div class="sns-grid">'
-    for ch in _SNS_CHANNEL_ORDER:
+    # ── 전체 요약 패널 ────────────────────────
+    summary_panel = f'<div id="sns-p-all" class="sns-panel">{_sns_summary_cards(channel_data)}</div>'
+
+    # ── 채널별 상세 패널 ──────────────────────
+    channel_panels = ''
+    for i, ch in enumerate(_SNS_CHANNEL_ORDER):
         meta  = _SNS_META[ch]
         color = meta['color']
         data  = channel_data.get(ch, {'rows': [], 'headers': []})
         rows  = data.get('rows', [])
-        count = len(rows)
-        badge = f'<span class="sns-badge">{count}일 입력</span>' if count else \
+        ci1   = meta['col_idx'][1]
+        filled = sum(1 for r in rows if ci1 < len(r) and r[ci1] is not None)
+        badge = f'<span class="sns-badge">{filled}일 입력</span>' if filled else \
                 '<span class="sns-badge sns-badge-empty">미입력</span>'
         detail = _sns_channel_detail(ch, data)
-        detail_html += (
-            f'<div class="sns-channel-card">'
-            f'<div class="sns-ch-header" style="background:{color}">'
+        channel_panels += (
+            f'<div id="sns-p-{i}" class="sns-panel" style="display:none">'
+            f'<div class="sns-ch-header" style="background:{color};border-radius:8px;margin-bottom:14px">'
             f'  {ch} {badge}'
             f'</div>'
             f'<div class="sns-ch-body">{detail}</div>'
             f'</div>'
         )
-    detail_html += '</div>'
 
-    return summary_html + detail_html
+    js = (
+        '<script>'
+        'function snsTab(btn,id){'
+        'document.querySelectorAll(".sns-tab").forEach(t=>t.classList.remove("sns-tab-active"));'
+        'document.querySelectorAll(".sns-panel").forEach(p=>p.style.display="none");'
+        'document.getElementById(id).style.display="block";'
+        'btn.classList.add("sns-tab-active");}'
+        '</script>'
+    )
+
+    return tab_bar + summary_panel + channel_panels + js
 
 
 # ════════════════════════════════════════════
@@ -747,15 +885,29 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 .sns-metric-label {{ font-size:11px; color:{C_MUTED}; margin-bottom:6px; }}
 .sns-value {{ font-size:22px; font-weight:800; margin-bottom:4px; }}
 .sns-delta {{ font-size:11px; font-weight:600; }}
-.sns-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}
-.sns-channel-card {{ background:white; border-radius:8px;
-    box-shadow:0 1px 4px rgba(0,0,0,.08); overflow:hidden; }}
 .sns-ch-header {{ color:white; font-weight:700; font-size:13px;
     padding:10px 16px; display:flex; align-items:center; justify-content:space-between; }}
-.sns-ch-body {{ padding:14px 16px; }}
+.sns-ch-body {{ padding:4px 0; }}
 .sns-badge {{ background:rgba(255,255,255,0.25); border-radius:10px;
     padding:2px 10px; font-size:11px; font-weight:600; }}
 .sns-badge-empty {{ background:rgba(0,0,0,0.20); }}
+/* SNS 탭 */
+.sns-tab-bar {{ display:flex; gap:4px; flex-wrap:wrap; margin-bottom:16px;
+    background:white; padding:6px; border-radius:10px;
+    box-shadow:0 1px 4px rgba(0,0,0,.08); }}
+.sns-tab {{ flex:1; min-width:80px; padding:8px 6px; text-align:center;
+    border-radius:7px; cursor:pointer; font-weight:600; font-size:12px;
+    border:none; background:transparent; color:{C_MUTED}; transition:all .15s; }}
+.sns-tab-active {{ background:{C_NAVY}; color:white; }}
+.sns-tab-badge {{ background:rgba(255,255,255,0.3); border-radius:8px;
+    padding:1px 6px; font-size:10px; margin-left:4px; }}
+.sns-panel {{ }}
+/* SNS 통계 요약 스트립 */
+.stats-strip {{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; }}
+.stat-box {{ background:{C_LIGHT}; border-radius:8px; padding:10px 14px; min-width:100px; flex:1; }}
+.stat-label {{ font-size:10px; color:{C_MUTED}; font-weight:600; margin-bottom:4px; }}
+.stat-val {{ font-size:15px; font-weight:800; color:{C_TEXT}; }}
+.stat-sub {{ font-size:10px; color:{C_MUTED}; margin-top:2px; }}
 
 /* 반응형 */
 @media (max-width: 900px) {{
