@@ -9,6 +9,8 @@ import tempfile
 import shutil
 import unicodedata
 import traceback
+import zipfile
+import io
 from pathlib import Path
 from datetime import datetime
 import sys
@@ -117,6 +119,25 @@ with st.expander("📱 SNS 채널 관리대장 연동 (선택사항)", expanded=
 
 st.divider()
 
+# ── 전월 데이터 업로드 (전월 동기간 대비용, 선택) ─────────────
+with st.expander("📅 전월 데이터 업로드 (전월 동기간 대비 비교용, 선택사항)", expanded=False):
+    st.caption("전월 광고 CSV를 업로드하면 KPI 카드에 '전월 동기간 대비 +X%' 가 표시됩니다.")
+    pcol1, pcol2, pcol3 = st.columns(3)
+    with pcol1:
+        st.markdown("**🟢 전월 네이버 SA**")
+        prev_naver_files = st.file_uploader("전월 주간리포트 + 키워드별", type="csv",
+            accept_multiple_files=True, key="prev_naver")
+    with pcol2:
+        st.markdown("**🔵 전월 구글 SA**")
+        prev_gsa_files = st.file_uploader("전월 게재된 시점 + 검색 키워드 + 전환", type="csv",
+            accept_multiple_files=True, key="prev_gsa")
+    with pcol3:
+        st.markdown("**🔴 전월 구글 DA**")
+        prev_gda_files = st.file_uploader("전월 게재된 시점 + 전환", type="csv",
+            accept_multiple_files=True, key="prev_gda")
+
+st.divider()
+
 # ── 생성 버튼 ────────────────────────────────────────────
 generate = st.button("🚀 보고서 생성", type="primary", use_container_width=True)
 
@@ -209,6 +230,32 @@ if generate:
                 if da_conv_df is not None:
                     da_conv_df = da_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
 
+                # 전월 데이터 파싱 (있을 경우)
+                prev_raw_df = None
+                has_prev_files = prev_naver_files or prev_gsa_files or prev_gda_files
+                if has_prev_files:
+                    prev_dir_n  = Path(tmp) / "prev_naver"
+                    prev_dir_gs = Path(tmp) / "prev_gsa"
+                    prev_dir_gd = Path(tmp) / "prev_gda"
+                    for d in [prev_dir_n, prev_dir_gs, prev_dir_gd]:
+                        d.mkdir(exist_ok=True)
+                    for f in (prev_naver_files or []):
+                        (prev_dir_n / f.name).write_bytes(f.read())
+                    for f in (prev_gsa_files or []):
+                        (prev_dir_gs / f.name).write_bytes(f.read())
+                    for f in (prev_gda_files or []):
+                        (prev_dir_gd / f.name).write_bytes(f.read())
+
+                    prev_dfs = []
+                    prev_naver_raw = load_or_empty(parse_naver_weekly, find_csv(prev_dir_n, '주간리포트'))
+                    if prev_naver_raw is not None: prev_dfs.append(prev_naver_raw)
+                    prev_gsa_raw = load_or_empty(parse_google_daily, find_csv(prev_dir_gs, '게재된 시점'), media_type='Google_SA')
+                    if prev_gsa_raw is not None: prev_dfs.append(prev_gsa_raw)
+                    prev_gda_raw = load_or_empty(parse_google_daily, find_csv(prev_dir_gd, '게재된 시점'), media_type='Google_DA')
+                    if prev_gda_raw is not None: prev_dfs.append(prev_gda_raw)
+                    if prev_dfs:
+                        prev_raw_df = pd.concat(prev_dfs, ignore_index=True)
+
                 # 기간 라벨 생성
                 dates = pd.to_datetime(raw_df['날짜'])
                 period_label = f'{dates.min().strftime("%Y.%m.%d")} ~ {dates.max().strftime("%Y.%m.%d")}'
@@ -240,32 +287,48 @@ if generate:
                     period_label=period_label,
                     output_path=html_path,
                     sns_tracker_path=sns_path,
+                    prev_raw_df=prev_raw_df,
                 )
 
             # ── 완료 & 다운로드 ──────────────────────────
             st.success(f"✅ 보고서 생성 완료!  |  기간: {period_label}")
             st.balloons()
 
-            col_dl1, col_dl2 = st.columns(2)
+            # ZIP 파일 생성 (Excel + HTML 동시 다운로드용)
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.write(xlsx_path, arcname=f'광고성과_장표_{today}.xlsx')
+                zf.write(html_path, arcname=f'광고성과_대시보드_{today}.html')
+            zip_bytes = zip_buf.getvalue()
+
+            col_dl1, col_dl2, col_dl3 = st.columns(3)
             with col_dl1:
                 with open(xlsx_path, 'rb') as f:
                     st.download_button(
-                        label="📊 Excel 장표 다운로드",
+                        label="📊 Excel 장표",
                         data=f.read(),
                         file_name=f'광고성과_장표_{today}.xlsx',
                         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         use_container_width=True,
-                        type="primary"
                     )
             with col_dl2:
                 with open(html_path, 'rb') as f:
                     st.download_button(
-                        label="🌐 HTML 대시보드 다운로드",
+                        label="🌐 HTML 대시보드",
                         data=f.read(),
                         file_name=f'광고성과_대시보드_{today}.html',
                         mime='text/html',
-                        use_container_width=True
+                        use_container_width=True,
                     )
+            with col_dl3:
+                st.download_button(
+                    label="📦 Excel + HTML 한번에",
+                    data=zip_bytes,
+                    file_name=f'광고성과_전체_{today}.zip',
+                    mime='application/zip',
+                    use_container_width=True,
+                    type="primary",
+                )
 
         except Exception as e:
             st.error(f"❌ 오류 발생: {e}")
