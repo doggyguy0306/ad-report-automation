@@ -12,7 +12,8 @@ import traceback
 import zipfile
 import io
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 import sys
 
 # ── 페이지 설정 ─────────────────────────────────────────
@@ -119,22 +120,36 @@ with st.expander("📱 SNS 채널 관리대장 연동 (선택사항)", expanded=
 
 st.divider()
 
-# ── 전월 데이터 업로드 (전월 동기간 대비용, 선택) ─────────────
-with st.expander("📅 전월 데이터 업로드 (전월 동기간 대비 비교용, 선택사항)", expanded=False):
-    st.caption("전월 광고 CSV를 업로드하면 KPI 카드에 '전월 동기간 대비 +X%' 가 표시됩니다.")
-    pcol1, pcol2, pcol3 = st.columns(3)
-    with pcol1:
-        st.markdown("**🟢 전월 네이버 SA**")
-        prev_naver_files = st.file_uploader("전월 주간리포트 + 키워드별", type="csv",
-            accept_multiple_files=True, key="prev_naver")
-    with pcol2:
-        st.markdown("**🔵 전월 구글 SA**")
-        prev_gsa_files = st.file_uploader("전월 게재된 시점 + 검색 키워드 + 전환", type="csv",
-            accept_multiple_files=True, key="prev_gsa")
-    with pcol3:
-        st.markdown("**🔴 전월 구글 DA**")
-        prev_gda_files = st.file_uploader("전월 게재된 시점 + 전환", type="csv",
-            accept_multiple_files=True, key="prev_gda")
+# ── 보고서 기간 설정 ──────────────────────────────────────
+st.markdown("### 📅 보고서 기간 설정")
+st.caption("업로드한 전체 데이터 중 보고서로 만들 기간을 선택하세요. 전월 동기간은 자동으로 계산됩니다.")
+
+this_month = date.today().replace(day=1)
+last_day_of_month = (this_month + relativedelta(months=1) - relativedelta(days=1))
+
+dcol1, dcol2 = st.columns(2)
+with dcol1:
+    report_start = st.date_input(
+        "보고서 시작일",
+        value=this_month,
+        help="보고서를 만들 기간의 첫째 날"
+    )
+with dcol2:
+    report_end = st.date_input(
+        "보고서 종료일",
+        value=last_day_of_month,
+        help="보고서를 만들 기간의 마지막 날"
+    )
+
+# 전월 동기간 자동 계산 및 안내
+prev_start = report_start - relativedelta(months=1)
+prev_end   = report_end   - relativedelta(months=1)
+
+st.info(
+    f"📊 **보고서 기간:** {report_start.strftime('%Y.%m.%d')} ~ {report_end.strftime('%Y.%m.%d')}"
+    f"　　"
+    f"🔄 **전월 동기간 (자동):** {prev_start.strftime('%Y.%m.%d')} ~ {prev_end.strftime('%Y.%m.%d')}"
+)
 
 st.divider()
 
@@ -213,8 +228,36 @@ if generate:
                     st.info("파일명에 '주간리포트', '게재된 시점' 키워드가 포함되어야 합니다.")
                     st.stop()
 
-                raw_df = pd.concat(raw_dfs, ignore_index=True)
-                raw_df = raw_df.sort_values(['날짜', '매체', '디바이스']).reset_index(drop=True)
+                raw_df_all = pd.concat(raw_dfs, ignore_index=True)
+                raw_df_all = raw_df_all.sort_values(['날짜', '매체', '디바이스']).reset_index(drop=True)
+                raw_df_all['날짜'] = pd.to_datetime(raw_df_all['날짜'])
+
+                # ── 기간 필터링 ──────────────────────────
+                # 보고서 대상 기간
+                mask_curr = (
+                    (raw_df_all['날짜'] >= pd.Timestamp(report_start)) &
+                    (raw_df_all['날짜'] <= pd.Timestamp(report_end))
+                )
+                raw_df = raw_df_all[mask_curr].copy()
+
+                if raw_df.empty:
+                    st.error(
+                        f"❌ 선택한 기간({report_start} ~ {report_end})에 해당하는 데이터가 없습니다.\n"
+                        "업로드한 파일의 날짜 범위를 확인해주세요."
+                    )
+                    st.stop()
+
+                # 전월 동기간 자동 추출
+                mask_prev = (
+                    (raw_df_all['날짜'] >= pd.Timestamp(prev_start)) &
+                    (raw_df_all['날짜'] <= pd.Timestamp(prev_end))
+                )
+                prev_raw_df = raw_df_all[mask_prev].copy()
+                if prev_raw_df.empty:
+                    prev_raw_df = None
+                    st.caption(f"ℹ️ 전월 동기간({prev_start} ~ {prev_end}) 데이터 없음 → 전월 비교 생략")
+                else:
+                    st.caption(f"✅ 전월 동기간 자동 감지: {prev_start} ~ {prev_end} ({len(prev_raw_df)}행)")
 
                 # 부가 데이터 파싱
                 naver_kw   = load_or_empty(parse_naver_keywords, naver_kw_files)
@@ -230,35 +273,8 @@ if generate:
                 if da_conv_df is not None:
                     da_conv_df = da_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
 
-                # 전월 데이터 파싱 (있을 경우)
-                prev_raw_df = None
-                has_prev_files = prev_naver_files or prev_gsa_files or prev_gda_files
-                if has_prev_files:
-                    prev_dir_n  = Path(tmp) / "prev_naver"
-                    prev_dir_gs = Path(tmp) / "prev_gsa"
-                    prev_dir_gd = Path(tmp) / "prev_gda"
-                    for d in [prev_dir_n, prev_dir_gs, prev_dir_gd]:
-                        d.mkdir(exist_ok=True)
-                    for f in (prev_naver_files or []):
-                        (prev_dir_n / f.name).write_bytes(f.read())
-                    for f in (prev_gsa_files or []):
-                        (prev_dir_gs / f.name).write_bytes(f.read())
-                    for f in (prev_gda_files or []):
-                        (prev_dir_gd / f.name).write_bytes(f.read())
-
-                    prev_dfs = []
-                    prev_naver_raw = load_or_empty(parse_naver_weekly, find_csv(prev_dir_n, '주간리포트'))
-                    if prev_naver_raw is not None: prev_dfs.append(prev_naver_raw)
-                    prev_gsa_raw = load_or_empty(parse_google_daily, find_csv(prev_dir_gs, '게재된 시점'), media_type='Google_SA')
-                    if prev_gsa_raw is not None: prev_dfs.append(prev_gsa_raw)
-                    prev_gda_raw = load_or_empty(parse_google_daily, find_csv(prev_dir_gd, '게재된 시점'), media_type='Google_DA')
-                    if prev_gda_raw is not None: prev_dfs.append(prev_gda_raw)
-                    if prev_dfs:
-                        prev_raw_df = pd.concat(prev_dfs, ignore_index=True)
-
-                # 기간 라벨 생성
-                dates = pd.to_datetime(raw_df['날짜'])
-                period_label = f'{dates.min().strftime("%Y.%m.%d")} ~ {dates.max().strftime("%Y.%m.%d")}'
+                # 기간 라벨
+                period_label = f'{report_start.strftime("%Y.%m.%d")} ~ {report_end.strftime("%Y.%m.%d")}'
 
                 # 출력 파일 경로
                 today = datetime.now().strftime('%Y%m%d')
