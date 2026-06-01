@@ -894,8 +894,32 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         p_gsa_비용   = p_gsa_df['비용'].sum()
         p_gda_비용   = p_gda_df['비용'].sum()
 
-    # ── KPI 카드 (전체 3개 + 매체별 상세 펼침) ─
+    # ── KPI 카드 (전체 5개 + 매체별 상세 펼침) ─
     def _mom(curr, prev): return _pct_mom(curr, prev) if has_prev else None
+
+    # CTR / CPC 계산
+    def _safe_div(a, b): return float(a) / float(b) if float(b) > 0 else 0.0
+    total_CTR = _safe_div(total_클릭, total_노출) * 100
+    total_CPC = _safe_div(total_비용, total_클릭)
+    naver_CTR = _safe_div(naver_클릭, naver_노출) * 100
+    gsa_CTR   = _safe_div(gsa_클릭,   gsa_노출)   * 100
+    gda_CTR   = _safe_div(gda_클릭,   gda_노출)   * 100
+    naver_CPC = _safe_div(naver_비용, naver_클릭)
+    gsa_CPC   = _safe_div(gsa_비용,   gsa_클릭)
+    gda_CPC   = _safe_div(gda_비용,   gda_클릭)
+
+    # 전월 CTR / CPC
+    p_total_CTR = p_naver_CTR = p_gsa_CTR = p_gda_CTR = 0.0
+    p_total_CPC = p_naver_CPC = p_gsa_CPC = p_gda_CPC = 0.0
+    if has_prev:
+        p_total_CTR = _safe_div(p_클릭,       p_노출)       * 100
+        p_naver_CTR = _safe_div(p_naver_클릭,  p_naver_노출) * 100
+        p_gsa_CTR   = _safe_div(p_gsa_클릭,    p_gsa_노출)   * 100
+        p_gda_CTR   = _safe_div(p_gda_클릭,    p_gda_노출)   * 100
+        p_total_CPC = _safe_div(p_비용,        p_클릭)
+        p_naver_CPC = _safe_div(p_naver_비용,  p_naver_클릭)
+        p_gsa_CPC   = _safe_div(p_gsa_비용,    p_gsa_클릭)
+        p_gda_CPC   = _safe_div(p_gda_비용,    p_gda_클릭)
 
     kpi_html = (
         _kpi_card_expandable(
@@ -903,13 +927,13 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             color=C_NAVY, mom=_mom(total_노출, p_노출),
             card_id='kpi-노출',
             detail_rows=[
-                ('🟢 네이버',   _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER, _mom(naver_노출, p_naver_노출)),
+                ('🟢 네이버',   _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER,  _mom(naver_노출, p_naver_노출)),
                 ('🔵 구글 SA',  _f(gsa_노출),   f'비중 {_fp(gsa_노출,   total_노출)}', C_GOOGLE, _mom(gsa_노출,   p_gsa_노출)),
                 ('🔴 구글 DA',  _f(gda_노출),   f'비중 {_fp(gda_노출,   total_노출)}', C_DA,     _mom(gda_노출,   p_gda_노출)),
             ]
         ) +
         _kpi_card_expandable(
-            label='전체 클릭', value=_f(total_클릭), sub=f'CTR {_fp(total_클릭, total_노출)}',
+            label='전체 클릭', value=_f(total_클릭), sub=f'전체 비중 100%',
             color=C_GOOGLE, mom=_mom(total_클릭, p_클릭),
             card_id='kpi-클릭',
             detail_rows=[
@@ -920,7 +944,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         ) +
         _kpi_card_expandable(
             label='전체 광고비', value=f'₩{_f(total_비용)}',
-            sub=f'CPC ₩{_f(total_비용/total_클릭 if total_클릭 else 0)}',
+            sub='기간 합계',
             color=C_DA, mom=_mom(total_비용, p_비용),
             card_id='kpi-비용',
             detail_rows=[
@@ -928,9 +952,31 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🔵 구글 SA',  f'₩{_f(gsa_비용)}',   f'비중 {_fp(gsa_비용,   total_비용)}', C_GOOGLE, _mom(gsa_비용,   p_gsa_비용)),
                 ('🔴 구글 DA',  f'₩{_f(gda_비용)}',   f'비중 {_fp(gda_비용,   total_비용)}', C_DA,     _mom(gda_비용,   p_gda_비용)),
             ]
+        ) +
+        _kpi_card_expandable(
+            label='전체 CTR', value=f'{total_CTR:.2f}%',
+            sub='클릭률 (클릭 ÷ 노출)',
+            color=C_GOLD, mom=_mom(total_CTR, p_total_CTR),
+            card_id='kpi-ctr',
+            detail_rows=[
+                ('🟢 네이버',   f'{naver_CTR:.2f}%', f'클릭 {_f(naver_클릭)}', C_NAVER,  _mom(naver_CTR, p_naver_CTR)),
+                ('🔵 구글 SA',  f'{gsa_CTR:.2f}%',   f'클릭 {_f(gsa_클릭)}',   C_GOOGLE, _mom(gsa_CTR,   p_gsa_CTR)),
+                ('🔴 구글 DA',  f'{gda_CTR:.2f}%',   f'클릭 {_f(gda_클릭)}',   C_DA,     _mom(gda_CTR,   p_gda_CTR)),
+            ]
+        ) +
+        _kpi_card_expandable(
+            label='평균 CPC', value=f'₩{_f(total_CPC)}',
+            sub='클릭당 광고비',
+            color=C_MUTED, mom=_mom(total_CPC, p_total_CPC),
+            card_id='kpi-cpc',
+            detail_rows=[
+                ('🟢 네이버',   f'₩{_f(naver_CPC)}', f'비용 {_f(naver_비용)}', C_NAVER,  _mom(naver_CPC, p_naver_CPC)),
+                ('🔵 구글 SA',  f'₩{_f(gsa_CPC)}',   f'비용 {_f(gsa_비용)}',   C_GOOGLE, _mom(gsa_CPC,   p_gsa_CPC)),
+                ('🔴 구글 DA',  f'₩{_f(gda_CPC)}',   f'비용 {_f(gda_비용)}',   C_DA,     _mom(gda_CPC,   p_gda_CPC)),
+            ]
         )
     )
-    kpi_section = f'<div class="kpi-grid-3">{kpi_html}</div>'
+    kpi_section = f'<div class="kpi-grid-5">{kpi_html}</div>'
 
     # 매체별 버튼 전환 매핑
     _btn_map = {}
@@ -1158,13 +1204,13 @@ body {{
 .header h1 {{ font-size: 20px; font-weight: 700; }}
 .header .meta {{ font-size: 12px; opacity: 0.7; margin-top: 6px; }}
 
-/* KPI 카드 — 전체 3개 + 상세 펼침 */
-.kpi-grid-3 {{ display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 20px; }}
+/* KPI 카드 — 전체 5개 + 상세 펼침 */
+.kpi-grid-5 {{ display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin-bottom: 20px; }}
 .kpi-expand-wrap {{ display: flex; flex-direction: column; }}
 .kpi-card {{ background: white; border-radius: 8px; padding: 14px 16px;
     box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
 .kpi-label {{ font-size: 11px; color: {C_MUTED}; font-weight: 500; margin-bottom: 6px; }}
-.kpi-value {{ font-size: 24px; font-weight: 700; }}
+.kpi-value {{ font-size: 20px; font-weight: 700; }}
 .kpi-sub {{ font-size: 11px; color: {C_MUTED}; margin-top: 4px; }}
 .kpi-mom {{ font-size: 11px; font-weight: 700; margin-top: 6px; padding: 3px 8px;
     background: #F8FAFC; border-radius: 12px; display: inline-block; }}
@@ -1269,7 +1315,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 
 /* 반응형 */
 @media (max-width: 900px) {{
-    .kpi-grid-3 {{ grid-template-columns: 1fr; }}
+    .kpi-grid-5 {{ grid-template-columns: repeat(2,1fr); }}
     .chart-row {{ flex-direction: column; }}
     .chart-narrow {{ max-width: 100%; flex: 1; }}
     .two-col-conv {{ grid-template-columns: 1fr; }}
