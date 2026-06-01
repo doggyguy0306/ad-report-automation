@@ -256,6 +256,50 @@ def _kpi_card(label, value, sub='', color=C_NAVY, mom=None):
             f'</div>')
 
 
+def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id):
+    """상세보기 토글이 있는 KPI 카드.
+    detail_rows: [(매체명, 값, sub문자열, color, mom_tuple_or_None), ...]
+    """
+    mom_html = ''
+    if mom:
+        mom_str, mom_color = mom
+        mom_html = (f'<div class="kpi-mom" style="color:{mom_color}">'
+                    f'전월 동기간 대비 {mom_str}</div>')
+
+    # 매체별 상세 행
+    detail_html = ''
+    for (m_label, m_val, m_sub, m_color, m_mom) in detail_rows:
+        m_mom_html = ''
+        if m_mom:
+            mm_str, mm_color = m_mom
+            m_mom_html = (f'<span class="kpi-dr-mom" style="color:{mm_color}">'
+                          f'전월 {mm_str}</span>')
+        detail_html += (
+            f'<div class="kpi-detail-row">'
+            f'<span class="kpi-dr-label" style="color:{m_color}">{m_label}</span>'
+            f'<span class="kpi-dr-val">{m_val}</span>'
+            f'<span class="kpi-dr-sub">{m_sub}</span>'
+            f'{m_mom_html}'
+            f'</div>'
+        )
+
+    return (
+        f'<div class="kpi-expand-wrap">'
+        f'  <div class="kpi-card" style="border-top:4px solid {color}">'
+        f'    <div class="kpi-label">{label}</div>'
+        f'    <div class="kpi-value" style="color:{color}">{value}</div>'
+        f'    <div class="kpi-sub">{sub}</div>'
+        f'    {mom_html}'
+        f'    <button class="kpi-detail-btn" onclick="toggleKpi(\'{card_id}\')">'
+        f'      <span id="{card_id}-icon">▼</span> 매체별 상세</button>'
+        f'  </div>'
+        f'  <div id="{card_id}" class="kpi-detail-panel">'
+        f'    {detail_html}'
+        f'  </div>'
+        f'</div>'
+    )
+
+
 def _table_html(headers, rows, stripe=True):
     """범용 HTML 테이블"""
     ths = ''.join(f'<th>{h}</th>' for h in headers)
@@ -819,33 +863,74 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     sa_버튼전환    = sum(sa_cd.values()) - sa_cd.get('페이지조회', 0)
     da_버튼전환    = sum(da_cd.values()) - da_cd.get('페이지조회', 0)
 
+    # ── 매체별 집계 ───────────────────────
+    naver_노출 = naver_df['노출'].sum()
+    gsa_노출   = gsa_df['노출'].sum()
+    gda_노출   = gda_df['노출'].sum()
+    naver_비용 = naver_df['비용'].sum()
+    gsa_비용   = gsa_df['비용'].sum()
+    gda_비용   = gda_df['비용'].sum()
+
     # ── 전월 동기간 집계 ───────────────────
-    p_노출 = p_클릭 = p_비용 = p_naver = p_gsa = p_gda = 0
+    p_노출 = p_클릭 = p_비용 = 0
+    p_naver_노출 = p_gsa_노출 = p_gda_노출 = 0
+    p_naver_클릭 = p_gsa_클릭 = p_gda_클릭 = 0
+    p_naver_비용 = p_gsa_비용 = p_gda_비용 = 0
     has_prev = prev_raw_df is not None and not prev_raw_df.empty
     if has_prev:
-        p_노출   = prev_raw_df['노출'].sum()
-        p_클릭   = prev_raw_df['클릭'].sum()
-        p_비용   = prev_raw_df['비용'].sum()
-        p_naver  = prev_raw_df[prev_raw_df['매체'].str.startswith('Naver')]['클릭'].sum()
-        p_gsa    = prev_raw_df[prev_raw_df['매체'] == 'Google_SA']['클릭'].sum()
-        p_gda    = prev_raw_df[prev_raw_df['매체'] == 'Google_DA']['클릭'].sum()
+        p_naver_df = prev_raw_df[prev_raw_df['매체'].str.startswith('Naver')]
+        p_gsa_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_SA']
+        p_gda_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_DA']
+        p_노출       = prev_raw_df['노출'].sum()
+        p_클릭       = prev_raw_df['클릭'].sum()
+        p_비용       = prev_raw_df['비용'].sum()
+        p_naver_노출 = p_naver_df['노출'].sum()
+        p_gsa_노출   = p_gsa_df['노출'].sum()
+        p_gda_노출   = p_gda_df['노출'].sum()
+        p_naver_클릭 = p_naver_df['클릭'].sum()
+        p_gsa_클릭   = p_gsa_df['클릭'].sum()
+        p_gda_클릭   = p_gda_df['클릭'].sum()
+        p_naver_비용 = p_naver_df['비용'].sum()
+        p_gsa_비용   = p_gsa_df['비용'].sum()
+        p_gda_비용   = p_gda_df['비용'].sum()
 
-    # ── KPI 카드 ───────────────────────────
+    # ── KPI 카드 (전체 3개 + 매체별 상세 펼침) ─
+    def _mom(curr, prev): return _pct_mom(curr, prev) if has_prev else None
+
     kpi_html = (
-        _kpi_card('전체 노출', _f(total_노출), '기간 합계', C_NAVY,
-                  mom=_pct_mom(total_노출, p_노출) if has_prev else None) +
-        _kpi_card('전체 클릭', _f(total_클릭), f'CTR {_fp(total_클릭, total_노출)}', C_GOOGLE,
-                  mom=_pct_mom(total_클릭, p_클릭) if has_prev else None) +
-        _kpi_card('전체 광고비', f'₩{_f(total_비용)}', f'CPC ₩{_f(total_비용/total_클릭 if total_클릭 else 0)}', C_DA,
-                  mom=_pct_mom(total_비용, p_비용) if has_prev else None) +
-        _kpi_card('네이버 클릭', _f(naver_클릭), f'전체 클릭비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,
-                  mom=_pct_mom(naver_클릭, p_naver) if has_prev else None) +
-        _kpi_card('구글 SA 클릭', _f(gsa_클릭), f'전체 클릭비중 {_fp(gsa_클릭, total_클릭)}', C_GOOGLE,
-                  mom=_pct_mom(gsa_클릭, p_gsa) if has_prev else None) +
-        _kpi_card('구글 DA 클릭', _f(gda_클릭), f'전체 클릭비중 {_fp(gda_클릭, total_클릭)}', C_DA,
-                  mom=_pct_mom(gda_클릭, p_gda) if has_prev else None)
+        _kpi_card_expandable(
+            label='전체 노출', value=_f(total_노출), sub='기간 합계',
+            color=C_NAVY, mom=_mom(total_노출, p_노출),
+            card_id='kpi-노출',
+            detail_rows=[
+                ('🟢 네이버',   _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER, _mom(naver_노출, p_naver_노출)),
+                ('🔵 구글 SA',  _f(gsa_노출),   f'비중 {_fp(gsa_노출,   total_노출)}', C_GOOGLE, _mom(gsa_노출,   p_gsa_노출)),
+                ('🔴 구글 DA',  _f(gda_노출),   f'비중 {_fp(gda_노출,   total_노출)}', C_DA,     _mom(gda_노출,   p_gda_노출)),
+            ]
+        ) +
+        _kpi_card_expandable(
+            label='전체 클릭', value=_f(total_클릭), sub=f'CTR {_fp(total_클릭, total_노출)}',
+            color=C_GOOGLE, mom=_mom(total_클릭, p_클릭),
+            card_id='kpi-클릭',
+            detail_rows=[
+                ('🟢 네이버',   _f(naver_클릭), f'비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,  _mom(naver_클릭, p_naver_클릭)),
+                ('🔵 구글 SA',  _f(gsa_클릭),   f'비중 {_fp(gsa_클릭,   total_클릭)}', C_GOOGLE, _mom(gsa_클릭,   p_gsa_클릭)),
+                ('🔴 구글 DA',  _f(gda_클릭),   f'비중 {_fp(gda_클릭,   total_클릭)}', C_DA,     _mom(gda_클릭,   p_gda_클릭)),
+            ]
+        ) +
+        _kpi_card_expandable(
+            label='전체 광고비', value=f'₩{_f(total_비용)}',
+            sub=f'CPC ₩{_f(total_비용/total_클릭 if total_클릭 else 0)}',
+            color=C_DA, mom=_mom(total_비용, p_비용),
+            card_id='kpi-비용',
+            detail_rows=[
+                ('🟢 네이버',   f'₩{_f(naver_비용)}', f'비중 {_fp(naver_비용, total_비용)}', C_NAVER,  _mom(naver_비용, p_naver_비용)),
+                ('🔵 구글 SA',  f'₩{_f(gsa_비용)}',   f'비중 {_fp(gsa_비용,   total_비용)}', C_GOOGLE, _mom(gsa_비용,   p_gsa_비용)),
+                ('🔴 구글 DA',  f'₩{_f(gda_비용)}',   f'비중 {_fp(gda_비용,   total_비용)}', C_DA,     _mom(gda_비용,   p_gda_비용)),
+            ]
+        )
     )
-    kpi_section = f'<div class="kpi-grid">{kpi_html}</div>'
+    kpi_section = f'<div class="kpi-grid-3">{kpi_html}</div>'
 
     # 매체별 버튼 전환 매핑
     _btn_map = {}
@@ -1073,15 +1158,33 @@ body {{
 .header h1 {{ font-size: 20px; font-weight: 700; }}
 .header .meta {{ font-size: 12px; opacity: 0.7; margin-top: 6px; }}
 
-/* KPI 카드 */
-.kpi-grid {{ display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; margin-bottom: 20px; }}
+/* KPI 카드 — 전체 3개 + 상세 펼침 */
+.kpi-grid-3 {{ display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 20px; }}
+.kpi-expand-wrap {{ display: flex; flex-direction: column; }}
 .kpi-card {{ background: white; border-radius: 8px; padding: 14px 16px;
     box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
 .kpi-label {{ font-size: 11px; color: {C_MUTED}; font-weight: 500; margin-bottom: 6px; }}
-.kpi-value {{ font-size: 20px; font-weight: 700; }}
+.kpi-value {{ font-size: 24px; font-weight: 700; }}
 .kpi-sub {{ font-size: 11px; color: {C_MUTED}; margin-top: 4px; }}
 .kpi-mom {{ font-size: 11px; font-weight: 700; margin-top: 6px; padding: 3px 8px;
     background: #F8FAFC; border-radius: 12px; display: inline-block; }}
+.kpi-detail-btn {{ margin-top: 10px; width: 100%; padding: 5px 0;
+    background: {C_LIGHT}; border: none; border-radius: 6px;
+    font-size: 11px; font-weight: 600; color: {C_MUTED}; cursor: pointer;
+    transition: background .15s; font-family: inherit; }}
+.kpi-detail-btn:hover {{ background: {C_BORDER}; color: {C_TEXT}; }}
+.kpi-detail-panel {{ display: none; background: white;
+    border: 1px solid {C_BORDER}; border-top: none;
+    border-radius: 0 0 8px 8px; overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,.06); }}
+.kpi-detail-row {{ display: flex; align-items: center; gap: 8px;
+    padding: 9px 14px; border-bottom: 1px solid {C_BORDER}; flex-wrap: wrap; }}
+.kpi-detail-row:last-child {{ border-bottom: none; }}
+.kpi-dr-label {{ font-size: 12px; font-weight: 700; min-width: 72px; }}
+.kpi-dr-val {{ font-size: 14px; font-weight: 700; color: {C_TEXT}; flex: 1; }}
+.kpi-dr-sub {{ font-size: 11px; color: {C_MUTED}; }}
+.kpi-dr-mom {{ font-size: 11px; font-weight: 700; padding: 2px 7px;
+    background: #F8FAFC; border-radius: 10px; margin-left: auto; }}
 
 /* 섹션 */
 .section {{ background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
@@ -1166,7 +1269,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 
 /* 반응형 */
 @media (max-width: 900px) {{
-    .kpi-grid {{ grid-template-columns: repeat(3,1fr); }}
+    .kpi-grid-3 {{ grid-template-columns: 1fr; }}
     .chart-row {{ flex-direction: column; }}
     .chart-narrow {{ max-width: 100%; flex: 1; }}
     .two-col-conv {{ grid-template-columns: 1fr; }}
@@ -1222,6 +1325,15 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 </div>
 
 <script>
+/* ── KPI 상세 펼침 토글 ── */
+function toggleKpi(id) {{
+  var panel = document.getElementById(id);
+  var icon  = document.getElementById(id + '-icon');
+  var open  = panel.style.display === 'block';
+  panel.style.display = open ? 'none' : 'block';
+  if (icon) icon.textContent = open ? '▼' : '▲';
+}}
+
 /* ── 집계 토글: 일별 ↔ 주별 ── */
 function setAggr(blockId, aggr) {{
   document.getElementById('daily-view-'  + blockId).style.display = aggr === 'daily'  ? '' : 'none';
