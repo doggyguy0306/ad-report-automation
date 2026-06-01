@@ -228,6 +228,189 @@ def _svg_pie(labels, values, colors, title=''):
 # HTML 섹션 빌더
 # ════════════════════════════════════════════
 
+def _insights_html(
+    total_노출, total_클릭, total_비용, total_CTR, total_CPC,
+    naver_클릭, naver_비용, naver_CTR, naver_CPC,
+    gsa_클릭, gsa_비용, gsa_CTR, gsa_CPC,
+    gda_클릭, gda_비용, gda_CTR, gda_CPC,
+    has_prev,
+    p_노출=0, p_클릭=0, p_비용=0,
+    p_total_CTR=0.0, p_total_CPC=0.0
+) -> str:
+    """데이터 기반 시사점 자동 생성 → HTML 반환"""
+
+    goods = []   # ✅ 잘된 점
+    warns = []   # ⚠️ 주의사항
+    recs  = []   # 💡 실행 제안
+
+    def pct_chg(curr, prev):
+        try:
+            p = float(prev)
+            return (float(curr) - p) / abs(p) * 100 if p != 0 else None
+        except Exception:
+            return None
+
+    # ── 1. 전월 대비 MoM 분석 ──────────────────
+    if has_prev:
+        # CTR MoM
+        ctr_d = pct_chg(total_CTR, p_total_CTR)
+        if ctr_d is not None:
+            if ctr_d >= 10:
+                goods.append(
+                    f'CTR이 전월 동기간 대비 <strong>+{ctr_d:.1f}%</strong> 향상됐습니다. '
+                    f'광고 소재·타겟팅 품질이 개선되고 있는 긍정적인 신호입니다.'
+                )
+            elif ctr_d <= -10:
+                warns.append(
+                    f'CTR이 전월 대비 <strong>{ctr_d:.1f}%</strong> 하락했습니다. '
+                    f'경쟁 심화 또는 소재 노후화 가능성이 있으니 점검이 필요합니다.'
+                )
+
+        # CPC MoM
+        cpc_d = pct_chg(total_CPC, p_total_CPC)
+        if cpc_d is not None:
+            if cpc_d >= 20:
+                warns.append(
+                    f'평균 CPC가 전월 대비 <strong>+{cpc_d:.1f}%</strong> 상승했습니다. '
+                    f'입찰 경쟁 심화 또는 품질지수 저하 가능성이 있습니다.'
+                )
+                recs.append(
+                    '비용 효율이 낮은 키워드를 정기적으로 점검·정리하고, '
+                    '광고 품질지수(QS) 향상을 통해 CPC를 낮추는 전략을 검토해보세요.'
+                )
+            elif cpc_d <= -10:
+                goods.append(
+                    f'평균 CPC가 전월 대비 <strong>{cpc_d:.1f}%</strong> 하락해 '
+                    f'클릭당 광고비 효율이 개선됐습니다. 키워드 관리 효과가 나타나고 있습니다.'
+                )
+
+        # 노출 vs 클릭 성장세
+        imp_d = pct_chg(total_노출, p_노출)
+        clk_d = pct_chg(total_클릭, p_클릭)
+        if imp_d is not None and clk_d is not None:
+            if imp_d > 10 and clk_d < -5:
+                warns.append(
+                    f'노출은 <strong>+{imp_d:.1f}%</strong> 증가했지만 클릭은 '
+                    f'<strong>{clk_d:.1f}%</strong> 감소했습니다. '
+                    f'광고가 노출되고 있지만 클릭을 유도하지 못하고 있어 소재 검토가 필요합니다.'
+                )
+            elif imp_d > 5 and clk_d is not None and clk_d > 0:
+                goods.append(
+                    f'노출(+{imp_d:.1f}%)과 클릭(+{clk_d:.1f}%) 모두 전월 대비 증가하며 '
+                    f'전반적인 성장세를 보이고 있습니다.'
+                )
+
+        # 광고비 대비 클릭 효율
+        cost_d = pct_chg(total_비용, p_비용)
+        if cost_d is not None and clk_d is not None:
+            if cost_d > 10 and clk_d is not None and clk_d < 0:
+                warns.append(
+                    f'광고비는 <strong>+{cost_d:.1f}%</strong> 증가했지만 클릭이 감소해 '
+                    f'비용 효율이 저하됐습니다. 예산 배분 재검토가 필요합니다.'
+                )
+
+    # ── 2. CTR 절대값 평가 ─────────────────────
+    # 한국 디지털 광고 업계: SA 3~6%, DA 0.3~1% / 전체 혼합 기준 2~4% 정상
+    if total_CTR >= 4.5:
+        goods.append(
+            f'전체 CTR이 <strong>{total_CTR:.2f}%</strong>로 업계 평균(2~4%)을 상회합니다. '
+            f'광고 소재와 타겟팅 설정이 효과적으로 작동하고 있습니다.'
+        )
+    elif total_CTR < 1.5:
+        warns.append(
+            f'전체 CTR이 <strong>{total_CTR:.2f}%</strong>로 낮은 수준입니다. '
+            f'광고 문구·이미지 소재 전면 점검을 권장합니다.'
+        )
+        recs.append(
+            '검색광고(SA) 광고문구에 구체적인 혜택·행동 유도(CTA)를 추가하고, '
+            '디스플레이(DA) 배너 소재를 최소 분기 1회 교체해 CTR 개선을 유도해보세요.'
+        )
+
+    # ── 3. 매체별 예산 편중 분석 ──────────────
+    if total_비용 > 0:
+        n_pct = naver_비용 / total_비용 * 100
+        g_pct = gsa_비용  / total_비용 * 100
+        d_pct = gda_비용  / total_비용 * 100
+
+        top = max([('네이버', n_pct), ('구글 SA', g_pct), ('구글 DA', d_pct)],
+                  key=lambda x: x[1])
+        if top[1] > 70:
+            warns.append(
+                f'광고비의 <strong>{top[1]:.0f}%</strong>가 {top[0]}에 집중되어 있습니다. '
+                f'특정 매체 장애·정책 변경 시 성과 급락 리스크가 있으니 '
+                f'매체 다각화를 검토해보세요.'
+            )
+
+        # CTR 기준 최고/최저 채널 비교
+        ch = [('네이버', naver_CTR, naver_비용), ('구글 SA', gsa_CTR, gsa_비용), ('구글 DA', gda_CTR, gda_비용)]
+        ch_with_spend = [(n, c, s) for n, c, s in ch if s > 0]
+        if len(ch_with_spend) >= 2:
+            best  = max(ch_with_spend, key=lambda x: x[1])
+            worst = min(ch_with_spend, key=lambda x: x[1])
+            if best[0] != worst[0] and worst[1] > 0:
+                ratio = best[1] / worst[1] if worst[1] > 0 else 0
+                if ratio >= 2:
+                    recs.append(
+                        f'CTR 기준 가장 효율적인 매체는 <strong>{best[0]}({best[1]:.2f}%)</strong>, '
+                        f'가장 낮은 매체는 <strong>{worst[0]}({worst[1]:.2f}%)</strong>입니다. '
+                        f'{worst[0]} 예산 일부를 {best[0]}으로 이동하는 것을 검토해보세요.'
+                    )
+
+    # ── 4. CPC 절대값 평가 (한국 업계 기준) ──
+    # 검색광고 평균 CPC 300~1000원 / DA 50~300원 범위
+    if total_CPC > 1000:
+        warns.append(
+            f'평균 CPC가 <strong>₩{_f(total_CPC)}</strong>으로 높은 수준입니다. '
+            f'고비용 키워드 위주로 운영되고 있을 가능성이 있습니다.'
+        )
+        recs.append(
+            '롱테일 키워드(구체적·긴 형태의 검색어) 비중을 늘리면 '
+            'CPC를 낮추면서 전환 의도가 높은 사용자를 유입할 수 있습니다.'
+        )
+    elif total_CPC < 100 and total_클릭 > 100:
+        goods.append(
+            f'평균 CPC가 <strong>₩{_f(total_CPC)}</strong>으로 매우 낮아 '
+            f'비용 효율적인 광고 운영이 이루어지고 있습니다.'
+        )
+
+    # ── 5. 구글 SA vs DA 비교 시사점 ──────────
+    if gsa_비용 > 0 and gda_비용 > 0 and gsa_CPC > 0 and gda_CPC > 0:
+        if gsa_CPC > gda_CPC * 3:
+            recs.append(
+                f'구글 SA CPC(₩{_f(gsa_CPC)})가 DA(₩{_f(gda_CPC)}) 대비 '
+                f'{gsa_CPC/gda_CPC:.1f}배 높습니다. 브랜드 인지도 목적이라면 '
+                f'DA 비중 확대가 비용 효율 측면에서 유리할 수 있습니다.'
+            )
+
+    # ── 6. 항상 제안: 더 나아가기 ────────────
+    recs.append(
+        '리타겟팅(재방문 사용자 대상) 캠페인을 추가하면 '
+        '이미 브랜드를 인지한 사용자의 전환을 높여 전체 ROI를 크게 끌어올릴 수 있습니다.'
+    )
+
+    # ── HTML 조립 ─────────────────────────────
+    if not goods and not warns and not recs:
+        return ''
+
+    def _block(title, items, cls):
+        if not items:
+            return ''
+        lis = ''.join(f'<li>{i}</li>' for i in items)
+        return (
+            f'<div class="ins-block {cls}">'
+            f'<div class="ins-title">{title}</div>'
+            f'<ul>{lis}</ul>'
+            f'</div>'
+        )
+
+    blocks = (
+        _block('✅ 잘된 점',   goods, 'ins-good') +
+        _block('⚠️ 주의사항', warns, 'ins-warn') +
+        _block('💡 실행 제안', recs,  'ins-rec')
+    )
+    return f'<div class="ins-grid">{blocks}</div>'
+
+
 def _pct_mom(curr, prev):
     """전월 대비 % 변화 → (표시문자열, 색상코드). 데이터 없으면 None"""
     try:
@@ -978,6 +1161,19 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     )
     kpi_section = f'<div class="kpi-grid-5">{kpi_html}</div>'
 
+    # ── 데이터 기반 시사점 ──────────────────────
+    insights_content = _insights_html(
+        total_노출=total_노출, total_클릭=total_클릭, total_비용=total_비용,
+        total_CTR=total_CTR, total_CPC=total_CPC,
+        naver_클릭=naver_클릭, naver_비용=naver_비용, naver_CTR=naver_CTR, naver_CPC=naver_CPC,
+        gsa_클릭=gsa_클릭,     gsa_비용=gsa_비용,     gsa_CTR=gsa_CTR,     gsa_CPC=gsa_CPC,
+        gda_클릭=gda_클릭,     gda_비용=gda_비용,     gda_CTR=gda_CTR,     gda_CPC=gda_CPC,
+        has_prev=has_prev,
+        p_노출=p_노출, p_클릭=p_클릭, p_비용=p_비용,
+        p_total_CTR=p_total_CTR, p_total_CPC=p_total_CPC,
+    )
+    insights_section = _section('📌 데이터 기반 시사점', C_NAVY, insights_content) if insights_content else ''
+
     # 매체별 버튼 전환 매핑
     _btn_map = {}
     for _, r in grp.iterrows():
@@ -1259,6 +1455,17 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
     text-align: center; margin-bottom: 8px; }}
 .two-col-conv {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 16px; }}
 
+/* 시사점 섹션 */
+.ins-grid {{ display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }}
+.ins-block {{ border-radius: 10px; padding: 16px 18px; }}
+.ins-good  {{ background: #F0FDF4; border: 1px solid #86EFAC; }}
+.ins-warn  {{ background: #FFFBEB; border: 1px solid #FCD34D; }}
+.ins-rec   {{ background: #EFF6FF; border: 1px solid #93C5FD; }}
+.ins-title {{ font-size: 13px; font-weight: 700; margin-bottom: 10px; color: {C_TEXT}; }}
+.ins-block ul {{ margin: 0; padding-left: 18px; }}
+.ins-block li {{ font-size: 13px; color: #374151; line-height: 1.65; margin-bottom: 7px; }}
+.ins-block li:last-child {{ margin-bottom: 0; }}
+
 /* SNS 섹션 */
 .sns-kpi-grid {{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:20px; }}
 .sns-kpi {{ background:white; border-radius:8px; padding:14px 16px;
@@ -1316,6 +1523,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 /* 반응형 */
 @media (max-width: 900px) {{
     .kpi-grid-5 {{ grid-template-columns: repeat(2,1fr); }}
+    .ins-grid {{ grid-template-columns: 1fr; }}
     .chart-row {{ flex-direction: column; }}
     .chart-narrow {{ max-width: 100%; flex: 1; }}
     .two-col-conv {{ grid-template-columns: 1fr; }}
@@ -1344,6 +1552,8 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
   </div>
 
   {kpi_section}
+
+  {insights_section}
 
   {_section('🔍 전체 매체 비교', C_NAVY, compare_content)}
 
