@@ -1104,6 +1104,25 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         p_gsa_CPC   = _safe_div(p_gsa_비용,    p_gsa_클릭)
         p_gda_CPC   = _safe_div(p_gda_비용,    p_gda_클릭)
 
+    # 버튼 전환율 계산
+    total_버튼전환 = naver_버튼전환 + sa_버튼전환 + da_버튼전환
+    total_전환율   = _safe_div(total_버튼전환, total_클릭) * 100
+    naver_전환율   = _safe_div(naver_버튼전환, naver_클릭) * 100
+    gsa_전환율     = _safe_div(sa_버튼전환,    gsa_클릭)   * 100
+    gda_전환율     = _safe_div(da_버튼전환,    gda_클릭)   * 100
+
+    # 전월 버튼 전환율 (raw_df '전환' 컬럼 기준)
+    p_total_전환율 = p_naver_전환율 = p_gsa_전환율 = p_gda_전환율 = 0.0
+    if has_prev:
+        p_naver_버튼전환 = p_naver_df['전환'].sum()
+        p_gsa_버튼전환   = p_gsa_df['전환'].sum()
+        p_gda_버튼전환   = p_gda_df['전환'].sum()
+        p_total_버튼전환 = p_naver_버튼전환 + p_gsa_버튼전환 + p_gda_버튼전환
+        p_total_전환율   = _safe_div(p_total_버튼전환, p_클릭)      * 100
+        p_naver_전환율   = _safe_div(p_naver_버튼전환, p_naver_클릭) * 100
+        p_gsa_전환율     = _safe_div(p_gsa_버튼전환,   p_gsa_클릭)   * 100
+        p_gda_전환율     = _safe_div(p_gda_버튼전환,   p_gda_클릭)   * 100
+
     kpi_html = (
         _kpi_card_expandable(
             label='전체 노출', value=_f(total_노출), sub='기간 합계',
@@ -1157,9 +1176,20 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🔵 구글 SA',  f'₩{_f(gsa_CPC)}',   f'비용 {_f(gsa_비용)}',   C_GOOGLE, _mom(gsa_CPC,   p_gsa_CPC)),
                 ('🔴 구글 DA',  f'₩{_f(gda_CPC)}',   f'비용 {_f(gda_비용)}',   C_DA,     _mom(gda_CPC,   p_gda_CPC)),
             ]
+        ) +
+        _kpi_card_expandable(
+            label='버튼 전환율', value=f'{total_전환율:.2f}%',
+            sub=f'총 {_f(total_버튼전환)}건 전환',
+            color='#7C3AED', mom=_mom(total_전환율, p_total_전환율),
+            card_id='kpi-conv',
+            detail_rows=[
+                ('🟢 네이버',   f'{_f(naver_버튼전환)}건', f'전환율 {naver_전환율:.2f}%', C_NAVER,  _mom(naver_전환율, p_naver_전환율)),
+                ('🔵 구글 SA',  f'{_f(sa_버튼전환)}건',    f'전환율 {gsa_전환율:.2f}%',   C_GOOGLE, _mom(gsa_전환율,   p_gsa_전환율)),
+                ('🔴 구글 DA',  f'{_f(da_버튼전환)}건',    f'전환율 {gda_전환율:.2f}%',   C_DA,     _mom(gda_전환율,   p_gda_전환율)),
+            ]
         )
     )
-    kpi_section = f'<div class="kpi-grid-5">{kpi_html}</div>'
+    kpi_section = f'<div class="kpi-grid-6">{kpi_html}</div>'
 
     # ── 데이터 기반 시사점 ──────────────────────
     insights_content = _insights_html(
@@ -1400,8 +1430,8 @@ body {{
 .header h1 {{ font-size: 20px; font-weight: 700; }}
 .header .meta {{ font-size: 12px; opacity: 0.7; margin-top: 6px; }}
 
-/* KPI 카드 — 전체 5개 + 상세 펼침 */
-.kpi-grid-5 {{ display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin-bottom: 20px; }}
+/* KPI 카드 — 전체 6개 (3×2) + 상세 펼침 */
+.kpi-grid-6 {{ display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 20px; }}
 .kpi-expand-wrap {{ display: flex; flex-direction: column; }}
 .kpi-card {{ background: white; border-radius: 8px; padding: 14px 16px;
     box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
@@ -1522,7 +1552,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 
 /* 반응형 */
 @media (max-width: 900px) {{
-    .kpi-grid-5 {{ grid-template-columns: repeat(2,1fr); }}
+    .kpi-grid-6 {{ grid-template-columns: repeat(2,1fr); }}
     .ins-grid {{ grid-template-columns: 1fr; }}
     .chart-row {{ flex-direction: column; }}
     .chart-narrow {{ max-width: 100%; flex: 1; }}
