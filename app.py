@@ -106,6 +106,72 @@ with col3:
 
 st.divider()
 
+# ── 전월 구글 전환 CSV 업로드 (선택 — 전월 전환율 정확도 향상) ───────
+with st.expander("📅 전월 구글 전환 데이터 업로드 (선택사항 — 전월 전환율 정확도 향상)", expanded=False):
+    st.caption(
+        "업로드하지 않으면 전월 전환율을 구글 일별 성과 CSV의 '전환' 합계로 계산합니다.  \n"
+        "이 경우 **페이지조회까지 전환수에 포함**되어 전환율이 실제보다 높게 나올 수 있습니다.  \n"
+        "정확한 전월 전환율을 보려면 **전월 기간의 DA·SA 전환 CSV**를 각각 업로드하세요."
+    )
+    prev_conv_c1, prev_conv_c2 = st.columns(2)
+    with prev_conv_c1:
+        st.markdown("**🔵 전월 구글 SA 전환**")
+        prev_gsa_conv_files = st.file_uploader(
+            "전월 SA_전환_*.csv",
+            type="csv",
+            accept_multiple_files=True,
+            key="prev_gsa_conv",
+            help="전월 기간의 구글 SA 전환 CSV (파일명에 '전환' 포함)"
+        )
+        if prev_gsa_conv_files:
+            for f in prev_gsa_conv_files:
+                st.caption(f"📎 {f.name}")
+    with prev_conv_c2:
+        st.markdown("**🔴 전월 구글 DA 전환**")
+        prev_gda_conv_files = st.file_uploader(
+            "전월 DA_전환_*.csv",
+            type="csv",
+            accept_multiple_files=True,
+            key="prev_gda_conv",
+            help="전월 기간의 구글 DA 전환 CSV (파일명에 '전환' 포함)"
+        )
+        if prev_gda_conv_files:
+            for f in prev_gda_conv_files:
+                st.caption(f"📎 {f.name}")
+
+st.divider()
+
+# ── Meta 광고 + Instagram 유기 데이터 연동 (선택) ─────────
+with st.expander("🔷 Meta 광고 + 📸 Instagram 유기 데이터 연동 (선택사항)", expanded=False):
+    st.caption(
+        "Meta 광고·Instagram 유기 CSV를 업로드하면 보고서에 자동 포함됩니다.  \n"
+        "Meta: `meta_scraper.py` 실행 → `meta_광고성과_*.csv`  \n"
+        "Instagram: `instagram_scraper.py` 실행 → `instagram_게시물성과_*.csv` 하나만 업로드하면 됩니다."
+    )
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        st.markdown("**🔷 Meta 광고 성과**")
+        meta_file = st.file_uploader(
+            "meta_광고성과_*.csv",
+            type="csv",
+            key="meta",
+            help="meta_scraper.py 로 생성된 Meta 광고 성과 CSV"
+        )
+        if meta_file:
+            st.caption(f"📎 {meta_file.name}")
+    with mc2:
+        st.markdown("**📸 Instagram 게시물 성과**")
+        ig_media_file = st.file_uploader(
+            "instagram_게시물성과_*.csv",
+            type="csv",
+            key="ig_media",
+            help="instagram_scraper.py 로 생성된 게시물 성과 CSV — 하나만 올리면 일별 차트도 자동 생성!"
+        )
+        if ig_media_file:
+            st.caption(f"📎 {ig_media_file.name}")
+
+st.divider()
+
 # ── SNS 관리대장 연동 (선택) ──────────────────────────────
 with st.expander("📱 SNS 채널 관리대장 연동 (선택사항)", expanded=False):
     st.caption("SNS_채널_관리대장.xlsx 를 업로드하면 종합 장표에 채널 현황이 함께 표시됩니다.")
@@ -259,6 +325,44 @@ if generate:
                 else:
                     st.caption(f"✅ 전월 동기간 자동 감지: {prev_start} ~ {prev_end} ({len(prev_raw_df)}행)")
 
+                # ── Meta 광고 CSV 처리 ────────────────────
+                if meta_file:
+                    try:
+                        meta_file.seek(0)
+                        _m = pd.read_csv(meta_file, encoding='utf-8-sig')
+                        _m['날짜'] = pd.to_datetime(_m['날짜'])
+                        _m['매체'] = 'Meta'
+                        if '디바이스' not in _m.columns:
+                            _m['디바이스'] = '전체'
+                        common_cols = [c for c in ['날짜', '매체', '디바이스', '노출', '클릭', '비용', '전환', 'CTR', 'CPC'] if c in _m.columns]
+                        _m_filtered = _m[common_cols]
+                        mask_meta = (
+                            (_m_filtered['날짜'] >= pd.Timestamp(report_start)) &
+                            (_m_filtered['날짜'] <= pd.Timestamp(report_end))
+                        )
+                        meta_filtered = _m_filtered[mask_meta]
+                        if not meta_filtered.empty:
+                            raw_df = pd.concat([raw_df, meta_filtered], ignore_index=True)
+                            raw_df = raw_df.sort_values(['날짜', '매체']).reset_index(drop=True)
+                            st.caption(f"✅ Meta 광고 데이터 {len(meta_filtered)}일치 포함")
+                        else:
+                            st.caption("ℹ️ Meta CSV: 선택 기간 내 데이터 없음")
+                    except Exception as e:
+                        st.warning(f"⚠️ Meta CSV 로드 실패: {e}")
+
+                # ── Instagram 유기 CSV 처리 ───────────────
+                ig_account_df = None   # 게시물 데이터에서 자동 계산됨
+                ig_media_df   = None
+
+                if ig_media_file:
+                    try:
+                        ig_media_file.seek(0)
+                        ig_media_df = pd.read_csv(ig_media_file, encoding='utf-8-sig')
+                        ig_media_df['날짜'] = pd.to_datetime(ig_media_df['날짜'])
+                        st.caption(f"✅ Instagram 게시물 성과 {len(ig_media_df)}개 포함")
+                    except Exception as e:
+                        st.warning(f"⚠️ Instagram 게시물 성과 로드 실패: {e}")
+
                 # 부가 데이터 파싱
                 naver_kw   = load_or_empty(parse_naver_keywords, naver_kw_files)
                 gsa_kw     = load_or_empty(parse_google_keywords, gsa_kw_files)
@@ -272,6 +376,31 @@ if generate:
                 da_conv_df = load_or_empty(parse_google_conversions, gda_conv_files)
                 if da_conv_df is not None:
                     da_conv_df = da_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+
+                # 전월 전환 CSV (선택) — 있으면 페이지조회 제외한 정확한 버튼 전환율 계산
+                prev_sa_conv_df = None
+                if prev_gsa_conv_files:
+                    prev_gsa_dir = Path(tmp) / "prev_gsa_conv"
+                    prev_gsa_dir.mkdir(exist_ok=True)
+                    for f in prev_gsa_conv_files:
+                        (prev_gsa_dir / f.name).write_bytes(f.read())
+                    prev_gsa_paths = find_csv(prev_gsa_dir, '')   # 전체 csv 탐색
+                    prev_sa_conv_df = load_or_empty(parse_google_conversions, prev_gsa_paths)
+                    if prev_sa_conv_df is not None:
+                        prev_sa_conv_df = prev_sa_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+                        st.caption(f"✅ 전월 SA 전환 데이터 포함 (버튼전환율 정확도 향상)")
+
+                prev_da_conv_df = None
+                if prev_gda_conv_files:
+                    prev_gda_dir = Path(tmp) / "prev_gda_conv"
+                    prev_gda_dir.mkdir(exist_ok=True)
+                    for f in prev_gda_conv_files:
+                        (prev_gda_dir / f.name).write_bytes(f.read())
+                    prev_gda_paths = find_csv(prev_gda_dir, '')   # 전체 csv 탐색
+                    prev_da_conv_df = load_or_empty(parse_google_conversions, prev_gda_paths)
+                    if prev_da_conv_df is not None:
+                        prev_da_conv_df = prev_da_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+                        st.caption(f"✅ 전월 DA 전환 데이터 포함 (버튼전환율 정확도 향상)")
 
                 # 기간 라벨
                 period_label = f'{report_start.strftime("%Y.%m.%d")} ~ {report_end.strftime("%Y.%m.%d")}'
@@ -304,6 +433,10 @@ if generate:
                     output_path=html_path,
                     sns_tracker_path=sns_path,
                     prev_raw_df=prev_raw_df,
+                    ig_account_df=ig_account_df,
+                    ig_media_df=ig_media_df,
+                    prev_sa_conv_df=prev_sa_conv_df,
+                    prev_da_conv_df=prev_da_conv_df,
                 )
 
             # ── 완료 & 다운로드 ──────────────────────────
@@ -360,15 +493,18 @@ with st.expander("📌 파일명 규칙 안내"):
     st.markdown("""
     파일명에 아래 키워드가 **반드시 포함**되어야 자동 인식됩니다.
 
-    | 매체 | 파일 종류 | 파일명에 포함될 키워드 |
-    |------|----------|----------------------|
-    | 네이버 SA | 일별 성과 | `주간리포트` |
-    | 네이버 SA | 키워드 성과 | `키워드별` |
-    | 구글 SA | 일별 성과 | `게재된 시점` |
-    | 구글 SA | 키워드 | `검색 키워드` |
-    | 구글 SA | 전환 | `전환` |
-    | 구글 SA | 검색어 | `검색어` |
-    | 구글 DA | 일별 성과 | `게재된 시점` |
-    | 구글 DA | 키워드 | `검색 키워드` |
-    | 구글 DA | 전환 | `전환` |
+    | 매체 | 파일 종류 | 파일명에 포함될 키워드 | 생성 방법 |
+    |------|----------|----------------------|----------|
+    | 네이버 SA | 일별 성과 | `주간리포트` | 네이버 검색광고 다운로드 |
+    | 네이버 SA | 키워드 성과 | `키워드별` | 네이버 검색광고 다운로드 |
+    | 구글 SA | 일별 성과 | `게재된 시점` | Google Ads 다운로드 |
+    | 구글 SA | 키워드 | `검색 키워드` | Google Ads 다운로드 |
+    | 구글 SA | 전환 | `전환` | Google Ads 다운로드 |
+    | 구글 SA | 검색어 | `검색어` | Google Ads 다운로드 |
+    | 구글 DA | 일별 성과 | `게재된 시점` | Google Ads 다운로드 |
+    | 구글 DA | 키워드 | `검색 키워드` | Google Ads 다운로드 |
+    | 구글 DA | 전환 | `전환` | Google Ads 다운로드 |
+    | **Meta 광고** | 광고 성과 | `meta_광고성과_` | `python meta_scraper.py` |
+    | **Instagram** | 계정 인사이트 | `instagram_계정인사이트_` | `python instagram_scraper.py` |
+    | **Instagram** | 게시물 성과 | `instagram_게시물성과_` | `python instagram_scraper.py` |
     """)

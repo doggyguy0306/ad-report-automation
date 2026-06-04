@@ -33,6 +33,9 @@ REPORT_DIR  = BASE_DIR / 'reports'
 # SNS 관리대장: 상위 폴더(~/Projects)에 있으면 자동 연동
 SNS_TRACKER = BASE_DIR.parent / 'SNS_채널_관리대장.xlsx'
 
+# Meta / Instagram: KT-Plaza-Marketing 폴더에서 최신 CSV 자동 감지
+KT_PLAZA_DIR = BASE_DIR.parent / 'KT-Plaza-Marketing'
+
 # 파일 이름 패턴 (구글은 이름으로 역할 구분)
 NAVER_WEEKLY_KW = '주간리포트'   # 주간리포트 양식
 NAVER_KEYWORD_KW = '키워드별'    # 키워드별 성과
@@ -40,6 +43,14 @@ GOOGLE_DAILY_KW  = '게재된 시점' # 광고가 게재된 시점
 GOOGLE_KW_KW     = '검색 키워드' # 검색 키워드
 GOOGLE_CONV_KW   = '전환'        # 전환
 GOOGLE_SRCH_KW   = '검색어'      # 검색어
+
+
+def find_latest_csv(folder: Path, prefix: str):
+    """prefix로 시작하는 가장 최신 CSV 반환 (없으면 None)"""
+    if not folder.exists():
+        return None
+    matches = sorted(folder.glob(f'{prefix}*.csv'), reverse=True)
+    return matches[0] if matches else None
 
 
 def find_csv(folder: Path, keyword: str) -> list:
@@ -188,6 +199,51 @@ def main():
         print()
         print(f'[SNS] 관리대장 없음 (선택사항)  — {SNS_TRACKER} 에 파일을 놓으면 종합 장표에 자동 연동됩니다.')
 
+    # ── 4-1. Meta 광고 CSV 자동 감지 ─────────────────
+    print()
+    meta_df = None
+    meta_csv = find_latest_csv(KT_PLAZA_DIR, 'meta_광고성과_')
+    if meta_csv:
+        try:
+            _m = pd.read_csv(meta_csv, encoding='utf-8-sig')
+            _m['날짜'] = pd.to_datetime(_m['날짜'])
+            _m['매체'] = 'Meta'
+            if '디바이스' not in _m.columns:
+                _m['디바이스'] = '전체'
+            # raw_df와 같은 컬럼만 유지
+            common_cols = [c for c in ['날짜', '매체', '디바이스', '노출', '클릭', '비용', '전환', 'CTR', 'CPC'] if c in _m.columns]
+            meta_df = _m[common_cols]
+            print(f'[Meta] 광고 데이터 감지됨 → {meta_csv.name} ({len(meta_df)}일치)')
+            # raw_df에 합산
+            raw_df = pd.concat([raw_df, meta_df], ignore_index=True)
+            raw_df = raw_df.sort_values(['날짜', '매체']).reset_index(drop=True)
+        except Exception as e:
+            print(f'[Meta] 로드 실패: {e}')
+    else:
+        print(f'[Meta] 광고 CSV 없음 — {KT_PLAZA_DIR}/meta_광고성과_*.csv 를 생성하면 자동 포함됩니다.')
+
+    # ── 4-2. Instagram 유기 CSV 자동 감지 ────────────
+    ig_account_df = None
+    ig_media_df   = None
+    ig_acct_csv   = find_latest_csv(KT_PLAZA_DIR, 'instagram_계정인사이트_')
+    ig_media_csv  = find_latest_csv(KT_PLAZA_DIR, 'instagram_게시물성과_')
+
+    if ig_acct_csv:
+        try:
+            ig_account_df = pd.read_csv(ig_acct_csv, encoding='utf-8-sig')
+            ig_account_df['날짜'] = pd.to_datetime(ig_account_df['날짜'])
+            print(f'[Instagram] 계정 인사이트 → {ig_acct_csv.name} ({len(ig_account_df)}일치)')
+        except Exception as e:
+            print(f'[Instagram] 계정 인사이트 로드 실패: {e}')
+
+    if ig_media_csv:
+        try:
+            ig_media_df = pd.read_csv(ig_media_csv, encoding='utf-8-sig')
+            ig_media_df['날짜'] = pd.to_datetime(ig_media_df['날짜'])
+            print(f'[Instagram] 게시물 성과   → {ig_media_csv.name} ({len(ig_media_df)}개)')
+        except Exception as e:
+            print(f'[Instagram] 게시물 성과 로드 실패: {e}')
+
     # ── 5. 장표 생성 ─────────────────────────────────
     print()
     print('[3] 장표 + HTML 대시보드 생성 중...')
@@ -216,6 +272,8 @@ def main():
         period_label=period_label,
         output_path=html_path,
         sns_tracker_path=sns_tracker_path,
+        ig_account_df=ig_account_df,
+        ig_media_df=ig_media_df,
     )
 
     # ── 6. 처리된 파일 이동 ───────────────────────────

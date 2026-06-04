@@ -15,6 +15,8 @@ from pathlib import Path
 C_NAVER  = '#1B6B3A'
 C_GOOGLE = '#4285F4'
 C_DA     = '#C0392B'
+C_META   = '#1877F2'
+C_IG     = '#E1306C'
 C_NAVY   = '#1E3A5F'
 C_GOLD   = '#F4B400'
 C_LIGHT  = '#F4F7FB'
@@ -123,6 +125,92 @@ def _svg_line(dates, values, color, title=''):
             f'<polygon points="{area_pts}" fill="{color}" opacity="0.10"/>'
             f'<polyline points="{line_pts}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linejoin="round"/>'
             f'{pts_svg}{x_lbl}</svg>')
+
+
+def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''):
+    """도달수 + 조회수 2개 라인 SVG 차트 (전체 날짜 + 호버 툴팁)"""
+    W, H = 780, 360
+    PL, PR, PT, PB = 52, 12, 55, 88
+    cw, ch = W - PL - PR, H - PT - PB
+    n = len(vals1)
+    if n == 0:
+        return (f'<svg width="{W}" height="{H}"><text x="50%" y="50%" '
+                f'text-anchor="middle" fill="#aaa">데이터 없음</text></svg>')
+
+    all_vals = list(vals1) + list(vals2)
+    max_v = max(all_vals) * 1.15 if max(all_vals) > 0 else 1
+    rng = max_v or 1
+
+    def px(i): return PL + (i / (n - 1)) * cw if n > 1 else PL + cw / 2
+    def py(v): return PT + (1 - v / rng) * ch
+
+    # 격자선 + Y레이블
+    grid = ''
+    for k in range(5):
+        gv = rng * k / 4
+        gy = py(gv)
+        grid += (f'<line x1="{PL}" y1="{gy:.1f}" x2="{PL+cw}" y2="{gy:.1f}" '
+                 f'stroke="#EEEEEE" stroke-width="1"/>'
+                 f'<text x="{PL-6}" y="{gy+4:.1f}" text-anchor="end" '
+                 f'font-size="10" fill="{C_MUTED}">{_f(gv)}</text>')
+
+    def _line_area(vals, color, opacity):
+        area = f'{PL:.1f},{PT+ch:.1f}'
+        for i, v in enumerate(vals): area += f' {px(i):.1f},{py(v):.1f}'
+        area += f' {px(n-1):.1f},{PT+ch:.1f}'
+        pts  = ' '.join(f'{px(i):.1f},{py(v):.1f}' for i, v in enumerate(vals))
+        return (f'<polygon points="{area}" fill="{color}" opacity="{opacity}"/>'
+                f'<polyline points="{pts}" fill="none" stroke="{color}" '
+                f'stroke-width="2.5" stroke-linejoin="round"/>')
+
+    # 점 + 호버 영역 (각 포인트마다 투명 rect)
+    dots_hover = ''
+    for i, (v1, v2) in enumerate(zip(vals1, vals2)):
+        x  = px(i)
+        y1 = py(v1)
+        y2 = py(v2)
+        d  = str(dates[i])[-5:]
+        # 호버 영역: 세로 띠 (인접 포인트 중간까지)
+        left  = px(i-1) if i > 0   else PL
+        right = px(i+1) if i < n-1 else PL+cw
+        hx    = (left + x) / 2
+        hw    = (x + right) / 2 - hx
+        dots_hover += (
+            f'<circle cx="{x:.1f}" cy="{y1:.1f}" r="4.5" fill="{color1}" stroke="white" stroke-width="1.5"/>'
+            f'<circle cx="{x:.1f}" cy="{y2:.1f}" r="4.5" fill="{color2}" stroke="white" stroke-width="1.5"/>'
+            f'<rect x="{hx:.1f}" y="{PT}" width="{hw:.1f}" height="{ch}" fill="transparent" '
+            f'onmousemove="showIgTip(event,\'{d}\',\'{_f(v1)}\',\'{_f(v2)}\')" '
+            f'onmouseleave="hideIgTip()" style="cursor:crosshair"/>'
+        )
+
+    # X레이블 — 전체 날짜 표시 (-65도 회전, 9px)
+    x_lbl = ''
+    for i in range(n):
+        xp = px(i)
+        x_lbl += (f'<text x="{xp:.1f}" y="{PT+ch+10}" text-anchor="end" '
+                  f'font-size="9" fill="{C_MUTED}" '
+                  f'transform="rotate(-65 {xp:.1f} {PT+ch+10})">{str(dates[i])[-5:]}</text>')
+
+    axes = (f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>'
+            f'<line x1="{PL}" y1="{PT+ch}" x2="{PL+cw}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>')
+
+    # 범례
+    lx = PL + 10
+    legend = (
+        f'<circle cx="{lx+7}" cy="22" r="5" fill="{color1}"/>'
+        f'<text x="{lx+16}" y="26" font-size="11" font-weight="600" fill="{color1}">{label1}</text>'
+        f'<circle cx="{lx+80}" cy="22" r="5" fill="{color2}"/>'
+        f'<text x="{lx+89}" y="26" font-size="11" font-weight="600" fill="{color2}">{label2}</text>'
+    )
+    title_svg = (f'<text x="{W/2}" y="32" text-anchor="middle" font-size="14" '
+                 f'font-weight="bold" fill="{C_NAVY}">{title}</text>')
+
+    return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
+            f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
+            f'{title_svg}{legend}{grid}{axes}'
+            f'{_line_area(vals1, color1, 0.10)}'
+            f'{_line_area(vals2, color2, 0.07)}'
+            f'{dots_hover}{x_lbl}</svg>')
 
 
 def _svg_bar_grouped(group_labels, datasets, title=''):
@@ -257,13 +345,11 @@ def _insights_html(
         if ctr_d is not None:
             if ctr_d >= 10:
                 goods.append(
-                    f'CTR이 전월 동기간 대비 <strong>+{ctr_d:.1f}%</strong> 향상됐습니다. '
-                    f'광고 소재·타겟팅 품질이 개선되고 있는 긍정적인 신호입니다.'
+                    f'CTR 전월 대비 <strong>+{ctr_d:.1f}%</strong> 향상 — 소재·타겟팅 품질 개선 긍정 신호'
                 )
             elif ctr_d <= -10:
                 warns.append(
-                    f'CTR이 전월 대비 <strong>{ctr_d:.1f}%</strong> 하락했습니다. '
-                    f'경쟁 심화 또는 소재 노후화 가능성이 있으니 점검이 필요합니다.'
+                    f'CTR 전월 대비 <strong>{ctr_d:.1f}%</strong> 하락 — 경쟁 심화 또는 소재 노후화 점검 필요'
                 )
 
         # CPC MoM
@@ -271,17 +357,14 @@ def _insights_html(
         if cpc_d is not None:
             if cpc_d >= 20:
                 warns.append(
-                    f'평균 CPC가 전월 대비 <strong>+{cpc_d:.1f}%</strong> 상승했습니다. '
-                    f'입찰 경쟁 심화 또는 품질지수 저하 가능성이 있습니다.'
+                    f'평균 CPC 전월 대비 <strong>+{cpc_d:.1f}%</strong> 상승 — 입찰 경쟁 심화 또는 품질지수 저하 가능성'
                 )
                 recs.append(
-                    '비용 효율이 낮은 키워드를 정기적으로 점검·정리하고, '
-                    '광고 품질지수(QS) 향상을 통해 CPC를 낮추는 전략을 검토해보세요.'
+                    '비용 효율 낮은 키워드 정기 점검·정리 필요, 광고 품질지수(QS) 향상 통해 CPC 낮추는 전략 검토 필요'
                 )
             elif cpc_d <= -10:
                 goods.append(
-                    f'평균 CPC가 전월 대비 <strong>{cpc_d:.1f}%</strong> 하락해 '
-                    f'클릭당 광고비 효율이 개선됐습니다. 키워드 관리 효과가 나타나고 있습니다.'
+                    f'평균 CPC 전월 대비 <strong>{cpc_d:.1f}%</strong> 하락 — 클릭당 비용 효율 개선, 키워드 관리 효과 확인'
                 )
 
         # 노출 vs 클릭 성장세
@@ -290,14 +373,11 @@ def _insights_html(
         if imp_d is not None and clk_d is not None:
             if imp_d > 10 and clk_d < -5:
                 warns.append(
-                    f'노출은 <strong>+{imp_d:.1f}%</strong> 증가했지만 클릭은 '
-                    f'<strong>{clk_d:.1f}%</strong> 감소했습니다. '
-                    f'광고가 노출되고 있지만 클릭을 유도하지 못하고 있어 소재 검토가 필요합니다.'
+                    f'노출 <strong>+{imp_d:.1f}%</strong> 증가 vs 클릭 <strong>{clk_d:.1f}%</strong> 감소 — 소재 클릭 유도력 점검 필요'
                 )
             elif imp_d > 5 and clk_d is not None and clk_d > 0:
                 goods.append(
-                    f'노출(+{imp_d:.1f}%)과 클릭(+{clk_d:.1f}%) 모두 전월 대비 증가하며 '
-                    f'전반적인 성장세를 보이고 있습니다.'
+                    f'노출(+{imp_d:.1f}%) · 클릭(+{clk_d:.1f}%) 동반 증가 — 전반적 성장세 유지 중'
                 )
 
         # 광고비 대비 클릭 효율
@@ -305,25 +385,21 @@ def _insights_html(
         if cost_d is not None and clk_d is not None:
             if cost_d > 10 and clk_d is not None and clk_d < 0:
                 warns.append(
-                    f'광고비는 <strong>+{cost_d:.1f}%</strong> 증가했지만 클릭이 감소해 '
-                    f'비용 효율이 저하됐습니다. 예산 배분 재검토가 필요합니다.'
+                    f'광고비 <strong>+{cost_d:.1f}%</strong> 증가 대비 클릭 감소 — 예산 배분 재검토 필요'
                 )
 
     # ── 2. CTR 절대값 평가 ─────────────────────
     # 한국 디지털 광고 업계: SA 3~6%, DA 0.3~1% / 전체 혼합 기준 2~4% 정상
     if total_CTR >= 4.5:
         goods.append(
-            f'전체 CTR이 <strong>{total_CTR:.2f}%</strong>로 업계 평균(2~4%)을 상회합니다. '
-            f'광고 소재와 타겟팅 설정이 효과적으로 작동하고 있습니다.'
+            f'전체 CTR <strong>{total_CTR:.2f}%</strong> — 업계 평균(2~4%) 상회, 소재·타겟팅 효과적'
         )
     elif total_CTR < 1.5:
         warns.append(
-            f'전체 CTR이 <strong>{total_CTR:.2f}%</strong>로 낮은 수준입니다. '
-            f'광고 문구·이미지 소재 전면 점검을 권장합니다.'
+            f'전체 CTR <strong>{total_CTR:.2f}%</strong> — 낮은 수준, 광고 문구·이미지 소재 전면 점검 권장'
         )
         recs.append(
-            '검색광고(SA) 광고문구에 구체적인 혜택·행동 유도(CTA)를 추가하고, '
-            '디스플레이(DA) 배너 소재를 최소 분기 1회 교체해 CTR 개선을 유도해보세요.'
+            'SA 광고문구에 구체적 혜택·CTA 추가 필요, DA 배너 소재 최소 분기 1회 교체 검토 필요'
         )
 
     # ── 3. 매체별 예산 편중 분석 ──────────────
@@ -336,9 +412,7 @@ def _insights_html(
                   key=lambda x: x[1])
         if top[1] > 70:
             warns.append(
-                f'광고비의 <strong>{top[1]:.0f}%</strong>가 {top[0]}에 집중되어 있습니다. '
-                f'특정 매체 장애·정책 변경 시 성과 급락 리스크가 있으니 '
-                f'매체 다각화를 검토해보세요.'
+                f'광고비 <strong>{top[1]:.0f}%</strong>가 {top[0]}에 집중 — 매체 장애·정책 변경 시 리스크, 다각화 검토 필요'
             )
 
         # CTR 기준 최고/최저 채널 비교
@@ -351,41 +425,33 @@ def _insights_html(
                 ratio = best[1] / worst[1] if worst[1] > 0 else 0
                 if ratio >= 2:
                     recs.append(
-                        f'CTR 기준 가장 효율적인 매체는 <strong>{best[0]}({best[1]:.2f}%)</strong>, '
-                        f'가장 낮은 매체는 <strong>{worst[0]}({worst[1]:.2f}%)</strong>입니다. '
-                        f'{worst[0]} 예산 일부를 {best[0]}으로 이동하는 것을 검토해보세요.'
+                        f'CTR 최고 매체 <strong>{best[0]}({best[1]:.2f}%)</strong> vs 최저 <strong>{worst[0]}({worst[1]:.2f}%)</strong> — {worst[0]} 예산 일부 {best[0]}으로 이동 검토 필요'
                     )
 
     # ── 4. CPC 절대값 평가 (한국 업계 기준) ──
     # 검색광고 평균 CPC 300~1000원 / DA 50~300원 범위
     if total_CPC > 1000:
         warns.append(
-            f'평균 CPC가 <strong>₩{_f(total_CPC)}</strong>으로 높은 수준입니다. '
-            f'고비용 키워드 위주로 운영되고 있을 가능성이 있습니다.'
+            f'평균 CPC <strong>₩{_f(total_CPC)}</strong> — 고비용 키워드 위주 운영 가능성, 키워드 구성 점검 필요'
         )
         recs.append(
-            '롱테일 키워드(구체적·긴 형태의 검색어) 비중을 늘리면 '
-            'CPC를 낮추면서 전환 의도가 높은 사용자를 유입할 수 있습니다.'
+            '롱테일 키워드 비중 확대 필요 — CPC 절감 + 전환 의도 높은 트래픽 유입 기대'
         )
     elif total_CPC < 100 and total_클릭 > 100:
         goods.append(
-            f'평균 CPC가 <strong>₩{_f(total_CPC)}</strong>으로 매우 낮아 '
-            f'비용 효율적인 광고 운영이 이루어지고 있습니다.'
+            f'평균 CPC <strong>₩{_f(total_CPC)}</strong> — 매우 낮은 수준, 비용 효율적 운영 유지 중'
         )
 
     # ── 5. 구글 SA vs DA 비교 시사점 ──────────
     if gsa_비용 > 0 and gda_비용 > 0 and gsa_CPC > 0 and gda_CPC > 0:
         if gsa_CPC > gda_CPC * 3:
             recs.append(
-                f'구글 SA CPC(₩{_f(gsa_CPC)})가 DA(₩{_f(gda_CPC)}) 대비 '
-                f'{gsa_CPC/gda_CPC:.1f}배 높습니다. 브랜드 인지도 목적이라면 '
-                f'DA 비중 확대가 비용 효율 측면에서 유리할 수 있습니다.'
+                f'구글 SA CPC(₩{_f(gsa_CPC)}) DA(₩{_f(gda_CPC)}) 대비 {gsa_CPC/gda_CPC:.1f}배 — 브랜드 인지 목적 시 DA 비중 확대 검토 필요'
             )
 
     # ── 6. 항상 제안: 더 나아가기 ────────────
     recs.append(
-        '리타겟팅(재방문 사용자 대상) 캠페인을 추가하면 '
-        '이미 브랜드를 인지한 사용자의 전환을 높여 전체 ROI를 크게 끌어올릴 수 있습니다.'
+        '리타겟팅 캠페인 추가 검토 필요 — 브랜드 인지 사용자 재접촉으로 전환율·ROI 향상 기대'
     )
 
     # ── HTML 조립 ─────────────────────────────
@@ -425,6 +491,63 @@ def _pct_mom(curr, prev):
         return None
 
 
+def _mini_bar_svg(prev_val, curr_val, color, fmt='n'):
+    """전월 vs 당월 비교 미니 막대그래프 SVG (카드 내 삽입용)"""
+    W, H   = 156, 68
+    BAR_W  = 46
+    GAP    = 18
+    PT     = 10   # top padding (value label space)
+    PB     = 20   # bottom padding (axis label space)
+    PL     = (W - BAR_W * 2 - GAP) // 2
+    CH     = H - PT - PB   # chart area height
+    BOTTOM = PT + CH
+
+    pv = float(prev_val) if prev_val else 0
+    cv = float(curr_val) if curr_val else 0
+    mx = max(pv, cv, 1)
+
+    ph = max(4, int(pv / mx * CH))
+    ch = max(4, int(cv / mx * CH))
+
+    px = PL
+    cx = PL + BAR_W + GAP
+
+    def _fmt(v):
+        if fmt == 'pct':   return f'{v:.1f}%'
+        if fmt == 'won':
+            if v >= 1_000_000: return f'₩{v/10000:.0f}만'
+            if v >= 10_000:    return f'₩{v/10000:.1f}만'
+            return f'₩{int(v):,}'
+        if v >= 1_000_000: return f'{v/10000:.0f}만'
+        if v >= 10_000:    return f'{v/10000:.1f}만'
+        if v >= 1_000:     return f'{v/1000:.1f}k'
+        return str(int(v))
+
+    GRAY = '#CBD5E0'
+    svg = (
+        f'<svg width="{W}" height="{H}" xmlns="http://www.w3.org/2000/svg" '
+        f'style="display:block;overflow:visible;flex-shrink:0">'
+        # 구분선
+        f'<line x1="0" y1="{BOTTOM}" x2="{W}" y2="{BOTTOM}" stroke="#E2E8F0" stroke-width="1"/>'
+        # 전월 bar (gray)
+        f'<rect x="{px}" y="{BOTTOM - ph}" width="{BAR_W}" height="{ph}" fill="{GRAY}" rx="3"/>'
+        # 당월 bar (accent)
+        f'<rect x="{cx}" y="{BOTTOM - ch}" width="{BAR_W}" height="{ch}" fill="{color}" rx="3" opacity="0.82"/>'
+        # 값 레이블
+        f'<text x="{px + BAR_W//2}" y="{BOTTOM - ph - 3}" '
+        f'text-anchor="middle" font-size="8.5" fill="#A0AEC0">{_fmt(pv)}</text>'
+        f'<text x="{cx + BAR_W//2}" y="{BOTTOM - ch - 3}" '
+        f'text-anchor="middle" font-size="8.5" font-weight="700" fill="{color}">{_fmt(cv)}</text>'
+        # 축 레이블
+        f'<text x="{px + BAR_W//2}" y="{H - 2}" '
+        f'text-anchor="middle" font-size="9" fill="#A0AEC0">전월</text>'
+        f'<text x="{cx + BAR_W//2}" y="{H - 2}" '
+        f'text-anchor="middle" font-size="9" font-weight="600" fill="{color}">당월</text>'
+        f'</svg>'
+    )
+    return svg
+
+
 def _kpi_card(label, value, sub='', color=C_NAVY, mom=None):
     mom_html = ''
     if mom:
@@ -439,15 +562,24 @@ def _kpi_card(label, value, sub='', color=C_NAVY, mom=None):
             f'</div>')
 
 
-def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id):
+def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id,
+                         bar_data=None):
     """상세보기 토글이 있는 KPI 카드.
     detail_rows: [(매체명, 값, sub문자열, color, mom_tuple_or_None), ...]
+    bar_data: (prev_val, curr_val, fmt) — 미니 막대그래프 표시용 (전월 데이터 있을 때만)
     """
     mom_html = ''
     if mom:
         mom_str, mom_color = mom
         mom_html = (f'<div class="kpi-mom" style="color:{mom_color}">'
                     f'전월 동기간 대비 {mom_str}</div>')
+
+    # 미니 막대그래프 (전월 데이터 있을 때만)
+    chart_html = ''
+    if bar_data is not None:
+        prev_val, curr_val, fmt = bar_data
+        if float(prev_val) > 0 or float(curr_val) > 0:
+            chart_html = _mini_bar_svg(prev_val, curr_val, color, fmt)
 
     # 매체별 상세 행
     detail_html = ''
@@ -466,13 +598,31 @@ def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id):
             f'</div>'
         )
 
+    # 텍스트(좌) + 차트(우) 가로 배치
+    if chart_html:
+        inner = (
+            f'<div style="display:flex;align-items:center;gap:10px;min-height:72px">'
+            f'  <div style="flex:1;min-width:0">'
+            f'    <div class="kpi-label">{label}</div>'
+            f'    <div class="kpi-value" style="color:{color}">{value}</div>'
+            f'    <div class="kpi-sub">{sub}</div>'
+            f'    {mom_html}'
+            f'  </div>'
+            f'  <div style="flex-shrink:0">{chart_html}</div>'
+            f'</div>'
+        )
+    else:
+        inner = (
+            f'<div class="kpi-label">{label}</div>'
+            f'<div class="kpi-value" style="color:{color}">{value}</div>'
+            f'<div class="kpi-sub">{sub}</div>'
+            f'{mom_html}'
+        )
+
     return (
         f'<div class="kpi-expand-wrap">'
         f'  <div class="kpi-card" style="border-top:4px solid {color}">'
-        f'    <div class="kpi-label">{label}</div>'
-        f'    <div class="kpi-value" style="color:{color}">{value}</div>'
-        f'    <div class="kpi-sub">{sub}</div>'
-        f'    {mom_html}'
+        f'    {inner}'
         f'    <button class="kpi-detail-btn" onclick="toggleKpi(\'{card_id}\')">'
         f'      <span id="{card_id}-icon">▼</span> 매체별 상세</button>'
         f'  </div>'
@@ -954,6 +1104,301 @@ def _sns_channel_detail(ch: str, data: dict, block_id: str = 'sns0') -> str:
     return stats_html + tbl_section + ad_html
 
 
+def _ig_insights_html(ig_media_df) -> str:
+    """Instagram 게시물 성과 기반 콘텐츠 시사점 자동 생성 → HTML"""
+    if ig_media_df is None or ig_media_df.empty or len(ig_media_df) < 2:
+        return ''
+
+    from collections import Counter
+    df = ig_media_df.copy()
+
+    goods = []
+    warns = []
+    recs  = []
+
+    # 숫자 정규화
+    for col in ['도달수', '조회수', '좋아요', '댓글', '저장수']:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # ── 1. 유형별 평균 성과 비교 ────────────────
+    if '유형' in df.columns:
+        type_grp = df.groupby('유형').agg(
+            평균조회수=('조회수', 'mean'),
+            평균도달수=('도달수', 'mean'),
+            게시물수=('도달수', 'count')
+        ).reset_index()
+
+        v_row = type_grp[type_grp['유형'] == 'VIDEO']
+        i_row = type_grp[type_grp['유형'] == 'IMAGE']
+
+        if not v_row.empty and not i_row.empty:
+            v_avg = v_row.iloc[0]['평균조회수']
+            i_avg = i_row.iloc[0]['평균조회수']
+            v_cnt = int(v_row.iloc[0]['게시물수'])
+            i_cnt = int(i_row.iloc[0]['게시물수'])
+            if v_avg > 0 and i_avg > 0:
+                ratio = v_avg / i_avg
+                if ratio >= 1.5:
+                    goods.append(
+                        f'동영상 평균 조회수({_f(int(v_avg))}) 이미지 대비 <strong>{ratio:.1f}배</strong> 높음 — 릴스·숏폼 집중 전략 유효'
+                    )
+                    recs.append(
+                        f'동영상({v_cnt}개) 비중 확대 필요 — 이미지({i_cnt}개) 일부 릴스 포맷 전환 검토'
+                    )
+                elif ratio < 0.8:
+                    goods.append(
+                        f'이미지 평균 조회수({_f(int(i_avg))})가 동영상 대비 높음 — 카드뉴스·이미지 포맷 강점 확인'
+                    )
+
+    # ── 2. 상위 게시물 캡션 패턴 분석 ────────────
+    sort_col = '조회수' if df['조회수'].sum() > 0 else '도달수'
+    top_df   = df.nlargest(min(3, len(df)), sort_col)
+
+    def _caption_patterns(caption):
+        cap = str(caption)
+        pats = []
+        if cap.startswith('"') or cap.startswith('“'):
+            pats.append('대화체')
+        if '...' in cap or '…' in cap:
+            pats.append('말줄임(궁금증)')
+        if '?' in cap:
+            pats.append('질문형')
+        if any(k in cap for k in ['사연', '후기', '경험', '이불킥', '실수', '얘기', '썰']):
+            pats.append('스토리텔링')
+        if any(k in cap for k in ['😢', '🥲', '😅', '😂', '❤️', '🔥', '😱']):
+            pats.append('감성이모지')
+        if any(k in cap for k in ['혜택', '할인', '이벤트', '공지', '소개', '출시']):
+            pats.append('프로모션')
+        return pats
+
+    all_pats = []
+    for _, row in top_df.iterrows():
+        all_pats.extend(_caption_patterns(row.get('캡션', '')))
+    dominant = [p for p, c in Counter(all_pats).most_common(2) if c >= 2]
+
+    if dominant:
+        goods.append(
+            f'상위 게시물 공통 패턴: <strong>{"·".join(dominant)}</strong> — 해당 스타일 지속 활용 권장'
+        )
+
+    best = top_df.iloc[0]
+    best_val     = int(best.get(sort_col, 0))
+    best_caption = str(best.get('캡션', ''))[:22]
+    best_type    = str(best.get('유형', '')).replace('VIDEO','동영상').replace('IMAGE','이미지').replace('CAROUSEL_ALBUM','카루셀')
+    if best_val > 0:
+        goods.append(
+            f'최고 성과 {best_type}: "<strong>{best_caption}…</strong>" — {sort_col} <strong>{_f(best_val)}</strong>'
+        )
+
+    # ── 3. 저장률 분석 (정보성 지표) ─────────────
+    total_saved = df['저장수'].sum()
+    total_reach = df['도달수'].sum()
+    if total_reach > 0 and total_saved > 0:
+        save_rate = total_saved / total_reach * 100
+        if save_rate >= 1.0:
+            goods.append(
+                f'평균 저장률 <strong>{save_rate:.2f}%</strong> — 정보·참고가치 높은 콘텐츠로 인식됨'
+            )
+        elif save_rate < 0.2:
+            warns.append(
+                f'저장률 <strong>{save_rate:.2f}%</strong> — 낮은 수준, 캡션 내 "저장해두세요" CTA 추가 검토 필요'
+            )
+
+    # ── 4. 댓글 참여 분석 ────────────────────────
+    avg_comments = df['댓글'].mean()
+    if avg_comments < 0.5 and len(df) >= 3:
+        warns.append(
+            f'평균 댓글 <strong>{avg_comments:.1f}개</strong>/게시물 — 질문형 마무리 또는 댓글 이벤트로 참여 유도 검토 필요'
+        )
+    elif avg_comments >= 3:
+        goods.append(
+            f'평균 댓글 <strong>{avg_comments:.1f}개</strong>/게시물 — 활발한 댓글 참여 유지 중'
+        )
+
+    # ── 5. 콘텐츠 방향 제안 ──────────────────────
+    if '유형' in df.columns:
+        video_ratio = len(df[df['유형'] == 'VIDEO']) / len(df) * 100
+        if video_ratio < 30:
+            recs.append(
+                f'동영상 비중 현재 <strong>{video_ratio:.0f}%</strong> — 릴스(15~30초) 비중 확대 권장, 알고리즘 노출 유리'
+            )
+
+    if '대화체' in dominant or '스토리텔링' in dominant:
+        recs.append(
+            '고객 실제 경험·대화체 캡션 포맷 지속 활용 필요 — 공감 기반 콘텐츠가 도달수·조회수 상위권 차지'
+        )
+    else:
+        recs.append(
+            '캡션에 고객 관점 대화체·사연 포맷 도입 검토 필요 — 공감·호기심 유발로 자연 도달 확대 기대'
+        )
+
+    if not goods and not warns and not recs:
+        return ''
+
+    def _ig_block(title, items, bg, border, title_color):
+        if not items:
+            return ''
+        lis = ''.join(
+            f'<li style="margin-bottom:6px;font-size:13px;line-height:1.6">{i}</li>'
+            for i in items
+        )
+        return (
+            f'<div style="background:{bg};border:1px solid {border};border-radius:8px;'
+            f'padding:14px 16px;flex:1;min-width:220px">'
+            f'<div style="font-size:12px;font-weight:700;color:{title_color};margin-bottom:10px">{title}</div>'
+            f'<ul style="margin:0;padding-left:18px;color:{C_TEXT}">{lis}</ul>'
+            f'</div>'
+        )
+
+    blocks = (
+        _ig_block('✅ 잘된 점',      goods, '#F0FDF4', '#86EFAC', '#16A34A') +
+        _ig_block('⚠️ 주의사항',    warns, '#FFFBEB', '#FCD34D', '#D97706') +
+        _ig_block('💡 콘텐츠 방향',  recs,  '#FFF0F5', '#F9A8D4', C_IG)
+    )
+    return (
+        f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;'
+        f'padding:16px;margin-top:16px">'
+        f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:12px">'
+        f'📌 콘텐츠 성과 시사점</div>'
+        f'<div style="display:flex;gap:12px;flex-wrap:wrap">{blocks}</div>'
+        f'</div>'
+    )
+
+
+def _build_instagram_section(ig_account_df, ig_media_df) -> str:
+    """Instagram 유기 성과 섹션 HTML
+    ig_account_df 없어도 ig_media_df 만으로 일별 집계를 자동 도출해 차트 표시.
+    """
+    parts = []
+
+    # ── 게시물 데이터에서 일별 집계 자동 도출 ─────
+    if ig_account_df is None and ig_media_df is not None and not ig_media_df.empty:
+        _tmp = ig_media_df.copy()
+        _tmp['날짜'] = pd.to_datetime(_tmp['날짜']).dt.normalize()
+        _agg = {'도달수': 'sum'}
+        if '조회수' in _tmp.columns:
+            _agg['조회수'] = 'sum'
+        daily = _tmp.groupby('날짜', as_index=False).agg(_agg).sort_values('날짜')
+        # 시작~종료일 사이 모든 날짜를 채워 연속 표시 (게시물 없는 날 = 0)
+        full_range = pd.date_range(start=daily['날짜'].min(), end=daily['날짜'].max(), freq='D')
+        daily = daily.set_index('날짜').reindex(full_range, fill_value=0).reset_index()
+        daily.rename(columns={'index': '날짜'}, inplace=True)
+        ig_account_df = daily
+
+    # ── 계정 인사이트 요약 ──────────────────────────
+    if ig_account_df is not None and not ig_account_df.empty:
+        total_reach = ig_account_df['도달수'].sum() if '도달수' in ig_account_df.columns else 0
+        _posting = ig_account_df[ig_account_df['도달수'] > 0] if '도달수' in ig_account_df.columns else pd.DataFrame()
+        avg_reach   = _posting['도달수'].mean() if not _posting.empty else 0
+        max_day     = ig_account_df.loc[ig_account_df['도달수'].idxmax()] if total_reach > 0 else None
+
+        # 게시물 데이터에서 추가 지표 계산
+        post_count   = len(ig_media_df) if ig_media_df is not None and not ig_media_df.empty else 0
+        total_likes  = int(ig_media_df['좋아요'].sum()) if ig_media_df is not None and '좋아요' in ig_media_df.columns else 0
+        total_saved  = int(ig_media_df['저장수'].sum()) if ig_media_df is not None and '저장수' in ig_media_df.columns else 0
+        # 팔로워 수: CSV에 컬럼 있으면 사용
+        follower_cnt = int(ig_media_df['팔로워수'].iloc[0]) if ig_media_df is not None and '팔로워수' in ig_media_df.columns else None
+
+        def _ig_card(label, value, sub=''):
+            return (f'<div style="background:#FDF2F8;border:1px solid #F0B8D4;'
+                    f'border-radius:10px;padding:16px;text-align:center">'
+                    f'<div style="font-size:11px;color:{C_IG};font-weight:600;margin-bottom:6px">{label}</div>'
+                    f'<div style="font-size:24px;font-weight:700;color:#333">{value}</div>'
+                    f'<div style="font-size:11px;color:#888;margin-top:4px">{sub}</div></div>')
+
+        # 팔로워수 → 게시물수 → 총좋아요  /  도달수 → 일평균 → 최고도달일
+        row1 = (
+            (_ig_card('팔로워 수', _f(follower_cnt), '현재 기준') if follower_cnt is not None
+             else _ig_card('총 저장수', _f(total_saved), '기간 합산')) +
+            _ig_card('게시물 수', f'{post_count}개', '기간 중 업로드') +
+            _ig_card('총 좋아요', _f(total_likes), '기간 합산')
+        )
+        row2 = (
+            _ig_card('기간 총 도달수', _f(total_reach), '게시물 도달 합산') +
+            _ig_card('일 평균 도달수', _f(avg_reach), '게시물 올린 날 기준') +
+            _ig_card('최고 도달일',
+                     max_day['날짜'].strftime('%m/%d') if max_day is not None else '-',
+                     f'{_f(max_day["도달수"])}명 도달' if max_day is not None else '')
+        )
+
+        summary_html = (
+            f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:10px">{row1}</div>'
+            f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">{row2}</div>'
+        )
+        parts.append(summary_html)
+
+        # 일별 도달수 + 조회수 듀얼 라인 차트
+        dates   = [str(d)[:10] for d in ig_account_df['날짜'].tolist()]
+        reach_v = ig_account_df['도달수'].tolist()
+        views_v = ig_account_df['조회수'].tolist() if '조회수' in ig_account_df.columns else [0]*len(reach_v)
+        chart   = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수', '일별 도달수 · 조회수')
+        parts.append(f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;margin-bottom:16px">'
+                     f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:8px">📈 일별 도달수 · 조회수 추이</div>'
+                     f'{chart}</div>')
+
+    # ── 게시물별 성과 테이블 ────────────────────────
+    if ig_media_df is not None and not ig_media_df.empty:
+        df = ig_media_df.copy()
+        # 도달수 기준 내림차순 정렬
+        if '도달수' in df.columns:
+            df = df.sort_values('도달수', ascending=False)
+
+        rows_html = ''
+        type_icon = {'IMAGE': '🖼', 'VIDEO': '🎬', 'CAROUSEL_ALBUM': '📸'}
+        for _, row in df.head(15).iterrows():
+            날짜 = str(row.get('날짜', ''))[:10]
+            유형 = row.get('유형', '')
+            icon = type_icon.get(유형, '📄')
+            caption = str(row.get('캡션', ''))[:30] or '(캡션 없음)'
+            likes   = _f(row.get('좋아요', 0))
+            comments= _f(row.get('댓글', 0))
+            reach   = _f(row.get('도달수', 0))
+            saved   = _f(row.get('저장수', 0))
+            rows_html += f'''<tr>
+              <td style="padding:8px 10px;font-size:12px;color:#555">{날짜}</td>
+              <td style="padding:8px 10px;font-size:12px">{icon} {유형.replace("CAROUSEL_ALBUM","카루셀").replace("IMAGE","이미지").replace("VIDEO","동영상")}</td>
+              <td style="padding:8px 10px;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{caption}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right;color:{C_IG};font-weight:600">{reach}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right">❤️ {likes}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right">💬 {comments}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right">🔖 {saved}</td>
+            </tr>'''
+
+        parts.append(f'''
+        <div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;overflow-x:auto">
+          <div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:12px">
+            📸 게시물별 성과 (도달수 상위 15개)
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th style="padding:8px 10px;text-align:left">날짜</th>
+                <th style="padding:8px 10px;text-align:left">유형</th>
+                <th style="padding:8px 10px;text-align:left">내용</th>
+                <th style="padding:8px 10px;text-align:right">도달수</th>
+                <th style="padding:8px 10px;text-align:right">좋아요</th>
+                <th style="padding:8px 10px;text-align:right">댓글</th>
+                <th style="padding:8px 10px;text-align:right">저장</th>
+              </tr>
+            </thead>
+            <tbody>{rows_html}</tbody>
+          </table>
+        </div>''')
+
+    # ── 콘텐츠 성과 시사점 ──────────────────────
+    if ig_media_df is not None and not ig_media_df.empty:
+        ig_insights = _ig_insights_html(ig_media_df)
+        if ig_insights:
+            parts.append(ig_insights)
+
+    if not parts:
+        return '<div style="text-align:center;padding:24px;color:#888;font-size:13px">Instagram 데이터를 수집하면 이 섹션이 자동으로 표시됩니다.</div>'
+
+    return ''.join(parts)
+
+
 def _build_sns_section(sns_path: str) -> str:
     """SNS 전체 섹션 HTML — 탭 UI (전체요약 + 채널별 상세)"""
     channel_data = _read_sns_channel_data(sns_path)
@@ -1015,7 +1460,9 @@ def _build_sns_section(sns_path: str) -> str:
 
 def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                       period_label='', output_path='report.html',
-                      sns_tracker_path=None, prev_raw_df=None):
+                      sns_tracker_path=None, prev_raw_df=None,
+                      ig_account_df=None, ig_media_df=None,
+                      prev_sa_conv_df=None, prev_da_conv_df=None):
 
     sa_cd = _cd(sa_conv_df)
     da_cd = _cd(da_conv_df)
@@ -1035,24 +1482,30 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     gsa_df    = raw_df[raw_df['매체'] == 'Google_SA']
     gda_df    = raw_df[raw_df['매체'] == 'Google_DA']
     google_df = raw_df[raw_df['매체'].str.startswith('Google')]
+    meta_df   = raw_df[raw_df['매체'] == 'Meta']
+    has_meta  = not meta_df.empty
 
     naver_클릭  = naver_df['클릭'].sum()
     gsa_클릭    = gsa_df['클릭'].sum()
     gda_클릭    = gda_df['클릭'].sum()
     google_클릭 = google_df['클릭'].sum()
+    meta_클릭   = meta_df['클릭'].sum() if has_meta else 0
 
     # 네이버: 별도 전환파일 없음 → raw 데이터 '총 전환수' 사용
     naver_버튼전환 = naver_df['전환'].sum()
     sa_버튼전환    = sum(sa_cd.values()) - sa_cd.get('페이지조회', 0)
     da_버튼전환    = sum(da_cd.values()) - da_cd.get('페이지조회', 0)
+    meta_버튼전환  = meta_df['전환'].sum() if has_meta else 0
 
     # ── 매체별 집계 ───────────────────────
     naver_노출 = naver_df['노출'].sum()
     gsa_노출   = gsa_df['노출'].sum()
     gda_노출   = gda_df['노출'].sum()
+    meta_노출  = meta_df['노출'].sum() if has_meta else 0
     naver_비용 = naver_df['비용'].sum()
     gsa_비용   = gsa_df['비용'].sum()
     gda_비용   = gda_df['비용'].sum()
+    meta_비용  = meta_df['비용'].sum() if has_meta else 0
 
     # ── 전월 동기간 집계 ───────────────────
     p_노출 = p_클릭 = p_비용 = 0
@@ -1090,6 +1543,9 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     naver_CPC = _safe_div(naver_비용, naver_클릭)
     gsa_CPC   = _safe_div(gsa_비용,   gsa_클릭)
     gda_CPC   = _safe_div(gda_비용,   gda_클릭)
+    meta_CTR  = _safe_div(meta_클릭,  meta_노출) * 100 if has_meta else 0.0
+    meta_CPC  = _safe_div(meta_비용,  meta_클릭)       if has_meta else 0.0
+    meta_전환율 = _safe_div(meta_버튼전환, meta_클릭) * 100 if has_meta else 0.0
 
     # 전월 CTR / CPC
     p_total_CTR = p_naver_CTR = p_gsa_CTR = p_gda_CTR = 0.0
@@ -1111,82 +1567,100 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     gsa_전환율     = _safe_div(sa_버튼전환,    gsa_클릭)   * 100
     gda_전환율     = _safe_div(da_버튼전환,    gda_클릭)   * 100
 
-    # 전월 버튼 전환율 (raw_df '전환' 컬럼 기준)
+    # 전월 버튼 전환율
+    # 전환 CSV가 있으면 _cd()로 페이지조회 제외, 없으면 raw_df '전환' 합계 사용
     p_total_전환율 = p_naver_전환율 = p_gsa_전환율 = p_gda_전환율 = 0.0
     if has_prev:
         p_naver_버튼전환 = p_naver_df['전환'].sum()
-        p_gsa_버튼전환   = p_gsa_df['전환'].sum()
-        p_gda_버튼전환   = p_gda_df['전환'].sum()
+        # SA: 전월 전환 CSV 있으면 정확한 버튼 전환만, 없으면 raw 합계
+        if prev_sa_conv_df is not None and not prev_sa_conv_df.empty:
+            p_sa_cd = _cd(prev_sa_conv_df)
+            p_gsa_버튼전환 = sum(p_sa_cd.values()) - p_sa_cd.get('페이지조회', 0)
+        else:
+            p_gsa_버튼전환 = p_gsa_df['전환'].sum()
+        # DA: 전월 전환 CSV 있으면 정확한 버튼 전환만, 없으면 raw 합계
+        if prev_da_conv_df is not None and not prev_da_conv_df.empty:
+            p_da_cd = _cd(prev_da_conv_df)
+            p_gda_버튼전환 = sum(p_da_cd.values()) - p_da_cd.get('페이지조회', 0)
+        else:
+            p_gda_버튼전환 = p_gda_df['전환'].sum()
         p_total_버튼전환 = p_naver_버튼전환 + p_gsa_버튼전환 + p_gda_버튼전환
         p_total_전환율   = _safe_div(p_total_버튼전환, p_클릭)      * 100
         p_naver_전환율   = _safe_div(p_naver_버튼전환, p_naver_클릭) * 100
         p_gsa_전환율     = _safe_div(p_gsa_버튼전환,   p_gsa_클릭)   * 100
         p_gda_전환율     = _safe_div(p_gda_버튼전환,   p_gda_클릭)   * 100
 
+    _bar = lambda pv, cv, fmt: (pv, cv, fmt) if has_prev else None
     kpi_html = (
         _kpi_card_expandable(
             label='전체 노출', value=_f(total_노출), sub='기간 합계',
             color=C_NAVY, mom=_mom(total_노출, p_노출),
             card_id='kpi-노출',
+            bar_data=_bar(p_노출, total_노출, 'n'),
             detail_rows=[
                 ('🟢 네이버',   _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER,  _mom(naver_노출, p_naver_노출)),
                 ('🔵 구글 SA',  _f(gsa_노출),   f'비중 {_fp(gsa_노출,   total_노출)}', C_GOOGLE, _mom(gsa_노출,   p_gsa_노출)),
                 ('🔴 구글 DA',  _f(gda_노출),   f'비중 {_fp(gda_노출,   total_노출)}', C_DA,     _mom(gda_노출,   p_gda_노출)),
-            ]
+            ] + ([('🔷 Meta', _f(meta_노출), f'비중 {_fp(meta_노출, total_노출)}', C_META, None)] if has_meta else [])
         ) +
         _kpi_card_expandable(
             label='전체 클릭', value=_f(total_클릭), sub=f'전체 비중 100%',
             color=C_GOOGLE, mom=_mom(total_클릭, p_클릭),
             card_id='kpi-클릭',
+            bar_data=_bar(p_클릭, total_클릭, 'n'),
             detail_rows=[
                 ('🟢 네이버',   _f(naver_클릭), f'비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,  _mom(naver_클릭, p_naver_클릭)),
                 ('🔵 구글 SA',  _f(gsa_클릭),   f'비중 {_fp(gsa_클릭,   total_클릭)}', C_GOOGLE, _mom(gsa_클릭,   p_gsa_클릭)),
                 ('🔴 구글 DA',  _f(gda_클릭),   f'비중 {_fp(gda_클릭,   total_클릭)}', C_DA,     _mom(gda_클릭,   p_gda_클릭)),
-            ]
+            ] + ([('🔷 Meta', _f(meta_클릭), f'비중 {_fp(meta_클릭, total_클릭)}', C_META, None)] if has_meta else [])
         ) +
         _kpi_card_expandable(
             label='전체 광고비', value=f'₩{_f(total_비용)}',
             sub='기간 합계',
             color=C_DA, mom=_mom(total_비용, p_비용),
             card_id='kpi-비용',
+            bar_data=_bar(p_비용, total_비용, 'won'),
             detail_rows=[
                 ('🟢 네이버',   f'₩{_f(naver_비용)}', f'비중 {_fp(naver_비용, total_비용)}', C_NAVER,  _mom(naver_비용, p_naver_비용)),
                 ('🔵 구글 SA',  f'₩{_f(gsa_비용)}',   f'비중 {_fp(gsa_비용,   total_비용)}', C_GOOGLE, _mom(gsa_비용,   p_gsa_비용)),
                 ('🔴 구글 DA',  f'₩{_f(gda_비용)}',   f'비중 {_fp(gda_비용,   total_비용)}', C_DA,     _mom(gda_비용,   p_gda_비용)),
-            ]
+            ] + ([('🔷 Meta', f'₩{_f(meta_비용)}', f'비중 {_fp(meta_비용, total_비용)}', C_META, None)] if has_meta else [])
         ) +
         _kpi_card_expandable(
             label='전체 CTR', value=f'{total_CTR:.2f}%',
             sub='클릭률 (클릭 ÷ 노출)',
             color=C_GOLD, mom=_mom(total_CTR, p_total_CTR),
             card_id='kpi-ctr',
+            bar_data=_bar(p_total_CTR, total_CTR, 'pct'),
             detail_rows=[
                 ('🟢 네이버',   f'{naver_CTR:.2f}%', f'클릭 {_f(naver_클릭)}', C_NAVER,  _mom(naver_CTR, p_naver_CTR)),
                 ('🔵 구글 SA',  f'{gsa_CTR:.2f}%',   f'클릭 {_f(gsa_클릭)}',   C_GOOGLE, _mom(gsa_CTR,   p_gsa_CTR)),
                 ('🔴 구글 DA',  f'{gda_CTR:.2f}%',   f'클릭 {_f(gda_클릭)}',   C_DA,     _mom(gda_CTR,   p_gda_CTR)),
-            ]
+            ] + ([('🔷 Meta', f'{meta_CTR:.2f}%', f'클릭 {_f(meta_클릭)}', C_META, None)] if has_meta else [])
         ) +
         _kpi_card_expandable(
             label='평균 CPC', value=f'₩{_f(total_CPC)}',
             sub='클릭당 광고비',
             color=C_MUTED, mom=_mom(total_CPC, p_total_CPC),
             card_id='kpi-cpc',
+            bar_data=_bar(p_total_CPC, total_CPC, 'won'),
             detail_rows=[
                 ('🟢 네이버',   f'₩{_f(naver_CPC)}', f'비용 {_f(naver_비용)}', C_NAVER,  _mom(naver_CPC, p_naver_CPC)),
                 ('🔵 구글 SA',  f'₩{_f(gsa_CPC)}',   f'비용 {_f(gsa_비용)}',   C_GOOGLE, _mom(gsa_CPC,   p_gsa_CPC)),
                 ('🔴 구글 DA',  f'₩{_f(gda_CPC)}',   f'비용 {_f(gda_비용)}',   C_DA,     _mom(gda_CPC,   p_gda_CPC)),
-            ]
+            ] + ([('🔷 Meta', f'₩{_f(meta_CPC)}', f'비용 {_f(meta_비용)}', C_META, None)] if has_meta else [])
         ) +
         _kpi_card_expandable(
             label='버튼 전환율', value=f'{total_전환율:.2f}%',
             sub=f'총 {_f(total_버튼전환)}건 전환',
             color='#7C3AED', mom=_mom(total_전환율, p_total_전환율),
             card_id='kpi-conv',
+            bar_data=_bar(p_total_전환율, total_전환율, 'pct'),
             detail_rows=[
                 ('🟢 네이버',   f'{_f(naver_버튼전환)}건', f'전환율 {naver_전환율:.2f}%', C_NAVER,  _mom(naver_전환율, p_naver_전환율)),
                 ('🔵 구글 SA',  f'{_f(sa_버튼전환)}건',    f'전환율 {gsa_전환율:.2f}%',   C_GOOGLE, _mom(gsa_전환율,   p_gsa_전환율)),
                 ('🔴 구글 DA',  f'{_f(da_버튼전환)}건',    f'전환율 {gda_전환율:.2f}%',   C_DA,     _mom(gda_전환율,   p_gda_전환율)),
-            ]
+            ] + ([('🔷 Meta', f'{_f(meta_버튼전환)}건', f'전환율 {meta_전환율:.2f}%', C_META, None)] if has_meta else [])
         )
     )
     kpi_section = f'<div class="kpi-grid-6">{kpi_html}</div>'
@@ -1550,6 +2024,27 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 .aggr-active {{ background:{C_NAVY} !important; color:white !important;
     border-color:{C_NAVY} !important; }}
 
+/* 메인 탭 네비게이션 */
+.main-tab-bar {{
+  display: flex; gap: 6px;
+  background: white; padding: 6px;
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.10);
+  margin-bottom: 20px;
+  position: sticky; top: 10px; z-index: 200;
+}}
+.main-tab {{
+  flex: 1; padding: 11px 10px; text-align: center;
+  border-radius: 10px; cursor: pointer;
+  font-weight: 700; font-size: 14px;
+  border: none; background: transparent; color: #777;
+  transition: all .18s; font-family: inherit; line-height: 1.3;
+}}
+.main-tab:hover {{ background: #f0f4fa; color: #333; }}
+.main-tab-active {{ background: {C_NAVY}; color: white; box-shadow: 0 2px 8px rgba(27,58,107,.25); }}
+.tab-panel {{ display: none; }}
+.tab-panel-active {{ display: block; }}
+
 /* 반응형 */
 @media (max-width: 900px) {{
     .kpi-grid-6 {{ grid-template-columns: repeat(2,1fr); }}
@@ -1559,6 +2054,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
     .two-col-conv {{ grid-template-columns: 1fr; }}
     .sns-kpi-grid {{ grid-template-columns: repeat(2,1fr); }}
     .sns-grid {{ grid-template-columns: 1fr; }}
+    .main-tab {{ font-size: 12px; padding: 9px 6px; }}
 }}
 """
 
@@ -1585,32 +2081,91 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 
   {insights_section}
 
-  {_section('🔍 전체 매체 비교', C_NAVY, compare_content)}
-
-  <div class="period-bar">
-    <span class="period-label">📅 기간 필터</span>
-    <button class="period-btn" onclick="setPeriod(this,7)">최근 7일</button>
-    <button class="period-btn" onclick="setPeriod(this,14)">최근 14일</button>
-    <button class="period-btn period-active" onclick="setPeriod(this,0)">전체</button>
+  <!-- ── 메인 탭 바 ── -->
+  <div class="main-tab-bar">
+    <button class="main-tab main-tab-active" id="tab-btn-ad"  onclick="switchTab('ad')">📊 광고 성과</button>
+    <button class="main-tab" id="tab-btn-ig"  onclick="switchTab('ig')">📸 Instagram 유기</button>
+    <button class="main-tab" id="tab-btn-sns" onclick="switchTab('sns')">📱 SNS 채널</button>
   </div>
 
-  {_section('🟢 네이버 SA', C_NAVER, naver_content + naver_conv_html)}
+  <!-- ── 광고 성과 탭 ── -->
+  <div class="tab-panel tab-panel-active" id="tab-panel-ad">
 
-  {_section('🔵 구글 SA (검색)', C_GOOGLE, gsa_content + sa_conv_content)}
+    {_section('🔍 전체 매체 비교', C_NAVY, compare_content)}
 
-  {_section('🔴 구글 DA (실적 최대화)', C_DA, gda_content + da_conv_content)}
+    <div class="period-bar">
+      <span class="period-label">📅 기간 필터</span>
+      <button class="period-btn" onclick="setPeriod(this,7)">최근 7일</button>
+      <button class="period-btn" onclick="setPeriod(this,14)">최근 14일</button>
+      <button class="period-btn period-active" onclick="setPeriod(this,0)">전체</button>
+    </div>
 
-  {_section('🎯 버튼 전환 상세 (SA / DA 비교)', C_GOOGLE, conv_content)}
+    {_section('🟢 네이버 SA', C_NAVER, naver_content + naver_conv_html)}
 
-  {_section('📱 SNS 채널 현황', '#6C3483',
-      _build_sns_section(sns_tracker_path) if sns_tracker_path else
-      '<div style="text-align:center;padding:24px;color:#888;font-size:13px">'
-      '광고 보고서 생성 시 <b>SNS_채널_관리대장.xlsx</b>를 함께 제공하면 이 섹션이 자동으로 표시됩니다.</div>'
-  )}
+    {_section('🔵 구글 SA (검색)', C_GOOGLE, gsa_content + sa_conv_content)}
+
+    {_section('🔴 구글 DA (실적 최대화)', C_DA, gda_content + da_conv_content)}
+
+    {_section('🎯 버튼 전환 상세 (SA / DA 비교)', C_GOOGLE, conv_content)}
+
+  </div>
+
+  <!-- ── Instagram 유기 탭 ── -->
+  <div class="tab-panel" id="tab-panel-ig">
+
+    {_section('📸 Instagram 유기 성과 (@ktplaza_story)', C_IG,
+        _build_instagram_section(ig_account_df, ig_media_df)
+    )}
+
+  </div>
+
+  <!-- ── SNS 채널 탭 ── -->
+  <div class="tab-panel" id="tab-panel-sns">
+
+    {_section('📱 SNS 채널 현황', '#6C3483',
+        _build_sns_section(sns_tracker_path) if sns_tracker_path else
+        '<div style="text-align:center;padding:24px;color:#888;font-size:13px">'
+        '광고 보고서 생성 시 <b>SNS_채널_관리대장.xlsx</b>를 함께 제공하면 이 섹션이 자동으로 표시됩니다.</div>'
+    )}
+
+  </div>
 
 </div>
 
+<!-- Instagram 호버 툴팁 -->
+<div id="ig-tooltip" style="position:fixed;display:none;background:rgba(30,58,95,0.93);
+  color:white;padding:9px 14px;border-radius:10px;font-size:12px;line-height:1.7;
+  pointer-events:none;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.25);
+  white-space:nowrap"></div>
+
 <script>
+/* ── Instagram 차트 툴팁 ── */
+function showIgTip(e, date, reach, views) {{
+  var tip = document.getElementById('ig-tooltip');
+  tip.innerHTML = '<b style="font-size:13px">' + date + '</b><br>'
+    + '<span style="color:#F9A8C9">● 도달수</span>  <b>' + reach + '</b><br>'
+    + '<span style="color:#FCD34D">● 조회수</span>  <b>' + views + '</b>';
+  tip.style.display = 'block';
+  tip.style.left = (e.clientX + 16) + 'px';
+  tip.style.top  = (e.clientY - 10) + 'px';
+}}
+function hideIgTip() {{
+  document.getElementById('ig-tooltip').style.display = 'none';
+}}
+
+/* ── 메인 탭 전환 ── */
+function switchTab(tabId) {{
+  document.querySelectorAll('.main-tab').forEach(function(t) {{
+    t.classList.remove('main-tab-active');
+  }});
+  document.querySelectorAll('.tab-panel').forEach(function(p) {{
+    p.classList.remove('tab-panel-active');
+  }});
+  document.getElementById('tab-btn-' + tabId).classList.add('main-tab-active');
+  document.getElementById('tab-panel-' + tabId).classList.add('tab-panel-active');
+  window.scrollTo({{top: 0, behavior: 'smooth'}});
+}}
+
 /* ── KPI 상세 펼침 토글 ── */
 function toggleKpi(id) {{
   var panel = document.getElementById(id);

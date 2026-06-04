@@ -22,3 +22,7 @@ __pycache__/
 .env
 venv/
 .venv/
+
+# API 키 파일 — 절대 커밋 금지
+.env.meta
+*.env.meta
