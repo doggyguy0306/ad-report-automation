@@ -1466,6 +1466,9 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
 
     sa_cd = _cd(sa_conv_df)
     da_cd = _cd(da_conv_df)
+    # 전월 전환 상세 딕셔너리 (버튼별 MoM 비교용)
+    p_sa_cd = _cd(prev_sa_conv_df) if (prev_sa_conv_df is not None and not prev_sa_conv_df.empty) else {}
+    p_da_cd = _cd(prev_da_conv_df) if (prev_da_conv_df is not None and not prev_da_conv_df.empty) else {}
     today = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     # ── 전체 집계 ──────────────────────────
@@ -1852,35 +1855,68 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     )
 
     # ── 버튼 전환 섹션 ─────────────────────
-    def _conv_block(cd, 클릭수, label, color):
+    def _conv_block(cd, 클릭수, label, color, prev_cd=None, prev_클릭수=0):
         if not cd: return ''
         상세 = cd.get('상세보기_버튼클릭', 0)
         예약 = cd.get('상담예약_버튼클릭', 0)
         신청 = cd.get('상담신청_버튼클릭', 0)
-        rows = [
-            ['상세보기 버튼클릭', _f(상세), _fp(상세, 클릭수)],
-            ['상담예약 버튼클릭', _f(예약), _fp(예약, 클릭수)],
-            ['상담신청 버튼클릭', _f(신청), _fp(신청, 클릭수)],
-            ['버튼클릭 합계',     _f(상세+예약+신청), _fp(상세+예약+신청, 클릭수)],
-        ]
-        tbl = _table_html(['전환 유형', '전환수', f'전환율({label} 클릭 대비)'], rows)
+        합계 = 상세 + 예약 + 신청
+
+        if prev_cd:
+            p상세 = prev_cd.get('상세보기_버튼클릭', 0)
+            p예약 = prev_cd.get('상담예약_버튼클릭', 0)
+            p신청 = prev_cd.get('상담신청_버튼클릭', 0)
+            p합계 = p상세 + p예약 + p신청
+            def _d(cur, prv):
+                if prv == 0: return '-'
+                delta = int(round(cur - prv))
+                sign, clr = ('▲', '#2F855A') if delta >= 0 else ('▼', '#C53030')
+                return f'<span style="color:{clr};font-weight:bold">{sign}{abs(delta):,}</span>'
+            rows = [
+                ['상세보기', f'{_f(상세)}건', _fp(상세, 클릭수),  f'{_f(p상세)}건', _fp(p상세, prev_클릭수), _d(상세, p상세)],
+                ['상담예약', f'{_f(예약)}건', _fp(예약, 클릭수),  f'{_f(p예약)}건', _fp(p예약, prev_클릭수), _d(예약, p예약)],
+                ['상담신청', f'{_f(신청)}건', _fp(신청, 클릭수),  f'{_f(p신청)}건', _fp(p신청, prev_클릭수), _d(신청, p신청)],
+                ['합계',     f'{_f(합계)}건', _fp(합계, 클릭수),  f'{_f(p합계)}건', _fp(p합계, prev_클릭수), _d(합계, p합계)],
+            ]
+            tbl = _table_html(['전환 유형', '이번달', '이번달 전환율', '전월', '전월 전환율', '증감'], rows)
+        else:
+            rows = [
+                ['상세보기 버튼클릭', _f(상세), _fp(상세, 클릭수)],
+                ['상담예약 버튼클릭', _f(예약), _fp(예약, 클릭수)],
+                ['상담신청 버튼클릭', _f(신청), _fp(신청, 클릭수)],
+                ['버튼클릭 합계',     _f(합계), _fp(합계, 클릭수)],
+            ]
+            tbl = _table_html(['전환 유형', '전환수', f'전환율({label} 클릭 대비)'], rows)
+
         return f'<div class="sub-title">{label} 버튼 전환</div>{tbl}'
 
-    sa_conv_content = _conv_block(sa_cd, gsa_클릭, 'SA', C_GOOGLE)
-    da_conv_content = _conv_block(da_cd, gda_클릭, 'DA', C_DA)
+    sa_conv_content = _conv_block(sa_cd, gsa_클릭, 'SA', C_GOOGLE, prev_cd=p_sa_cd, prev_클릭수=p_gsa_클릭)
+    da_conv_content = _conv_block(da_cd, gda_클릭, 'DA', C_DA,     prev_cd=p_da_cd, prev_클릭수=p_gda_클릭)
 
-    # SA vs DA 비교 바차트
+    # SA vs DA 비교 바차트 (전월 데이터 있으면 이번달 vs 전월 함께 표시)
     btn_labels = ['상세보기', '상담예약', '상담신청']
     sa_vals = [sa_cd.get('상세보기_버튼클릭',0), sa_cd.get('상담예약_버튼클릭',0), sa_cd.get('상담신청_버튼클릭',0)]
     da_vals = [da_cd.get('상세보기_버튼클릭',0), da_cd.get('상담예약_버튼클릭',0), da_cd.get('상담신청_버튼클릭',0)]
-    svg_conv_bar = _svg_bar_grouped(
-        btn_labels,
-        [('Google SA', sa_vals, C_GOOGLE), ('Google DA', da_vals, C_DA)],
-        title='SA vs DA 버튼별 전환 비교'
-    )
+    if p_sa_cd or p_da_cd:
+        p_sa_vals = [p_sa_cd.get('상세보기_버튼클릭',0), p_sa_cd.get('상담예약_버튼클릭',0), p_sa_cd.get('상담신청_버튼클릭',0)]
+        p_da_vals = [p_da_cd.get('상세보기_버튼클릭',0), p_da_cd.get('상담예약_버튼클릭',0), p_da_cd.get('상담신청_버튼클릭',0)]
+        svg_conv_bar = _svg_bar_grouped(
+            btn_labels,
+            [('SA 이번달', sa_vals, C_GOOGLE), ('SA 전월', p_sa_vals, '#A8C4F5'),
+             ('DA 이번달', da_vals, C_DA),     ('DA 전월', p_da_vals, '#F2A9A2')],
+            title='SA · DA 버튼 전환 — 이번달 vs 전월'
+        )
+        conv_chart_title = 'SA · DA 버튼 전환 — 이번달 vs 전월'
+    else:
+        svg_conv_bar = _svg_bar_grouped(
+            btn_labels,
+            [('Google SA', sa_vals, C_GOOGLE), ('Google DA', da_vals, C_DA)],
+            title='SA vs DA 버튼별 전환 비교'
+        )
+        conv_chart_title = 'SA vs DA 버튼별 전환 비교'
 
     conv_content = (
-        f'{_chart_block("SA vs DA 버튼별 전환 비교", svg_conv_bar)}'
+        f'{_chart_block(conv_chart_title, svg_conv_bar)}'
         f'<div class="two-col-conv">'
         f'<div>{sa_conv_content}</div>'
         f'<div>{da_conv_content}</div>'
