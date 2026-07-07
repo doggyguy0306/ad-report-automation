@@ -119,9 +119,31 @@ def parse_naver_keywords(filepath: str) -> pd.DataFrame:
 # ────────────────────────────────────────
 
 def _read_google_csv(filepath: str) -> pd.DataFrame:
-    df = pd.read_csv(filepath, encoding='utf-16', sep='\t', skiprows=2)
+    """
+    Google Ads CSV 파싱 — 인코딩 자동 감지
+    · 기존 형식: UTF-16 BOM + 탭 구분 + 상단 2줄 메타정보
+    · 신규 형식: UTF-8 / UTF-8-SIG + 콤마 구분 + 상단 2줄 메타정보
+    """
+    with open(filepath, 'rb') as f:
+        bom = f.read(4)
+
+    if bom[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        # UTF-16 LE/BE BOM — 기존 구글 광고 형식
+        df = pd.read_csv(filepath, encoding='utf-16', sep='\t', skiprows=2)
+    else:
+        # UTF-8 계열 신규 형식 — 구분자 및 헤더 행 자동 탐색
+        enc = 'utf-8-sig' if bom[:3] == b'\xef\xbb\xbf' else 'utf-8'
+        with open(filepath, encoding=enc, errors='replace') as f:
+            preview = [f.readline() for _ in range(5)]
+        sep = '\t' if any('\t' in ln for ln in preview) else ','
+        # 구분자가 2개 이상 등장하는 첫 번째 줄 = 실제 헤더 행
+        skiprows = next(
+            (i for i, ln in enumerate(preview) if ln.count(sep) >= 2),
+            0
+        )
+        df = pd.read_csv(filepath, encoding=enc, sep=sep, skiprows=skiprows)
+
     df.columns = df.columns.str.strip()
-    # 마지막 합계 행 제거 (보통 '합계' 또는 비어있음)
     df = df[~df.iloc[:, 0].astype(str).str.startswith('합계')]
     df = df[~df.iloc[:, 0].astype(str).str.startswith('총계')]
     return df
@@ -133,10 +155,6 @@ def parse_google_daily(filepath: str, media_type: str = 'Google_SA') -> pd.DataF
     media_type: 'Google_SA' 또는 'Google_DA'
     """
     df = _read_google_csv(filepath)
-
-    # 헤더에서 기간 파악
-    with open(filepath, encoding='utf-16') as f:
-        header = f.readline().strip()
 
     df['날짜'] = pd.to_datetime(df['일'], errors='coerce')
     df = df.dropna(subset=['날짜'])
