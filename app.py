@@ -60,6 +60,13 @@ def load_or_empty(parse_fn, files, **kwargs):
 # ── UI 헤더 ─────────────────────────────────────────────
 st.title("📊 광고 성과 장표 자동 생성")
 st.caption("CSV 파일을 업로드하면 Excel 장표와 HTML 대시보드를 자동으로 생성합니다.")
+
+st.info(
+    "📌 **전월 비교 수치를 보려면 전월 데이터도 함께 업로드해야 합니다.**\n\n"
+    "당월 CSV만 올리면 전월 대비 증감(▲▼) 수치가 표시되지 않습니다.  \n"
+    "**업로드 방법:** 각 매체(네이버·구글 SA·구글 DA)에서 **당월 + 전월** 기간의 CSV를 각각 다운로드하여 함께 업로드하세요.",
+    icon="ℹ️"
+)
 st.divider()
 
 # ── 파일 업로드 섹션 ─────────────────────────────────────
@@ -369,13 +376,22 @@ if generate:
                 gda_kw     = load_or_empty(parse_google_keywords, gda_kw_files)
                 srch_df    = load_or_empty(parse_google_search_terms, gsa_srch_files)
 
+                # ── 구글 전환 CSV 파싱 (디버그 출력 포함) ──
+                st.caption(f"🔍 SA 전환 파일 탐색: {[Path(f).name for f in gsa_conv_files]}")
                 sa_conv_df = load_or_empty(parse_google_conversions, gsa_conv_files)
                 if sa_conv_df is not None:
                     sa_conv_df = sa_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+                    st.caption(f"✅ SA 전환 데이터 파싱 완료: {sa_conv_df.to_dict('records')}")
+                else:
+                    st.caption("⚠️ SA 전환 파일 없음 또는 파싱 실패")
 
+                st.caption(f"🔍 DA 전환 파일 탐색: {[Path(f).name for f in gda_conv_files]}")
                 da_conv_df = load_or_empty(parse_google_conversions, gda_conv_files)
                 if da_conv_df is not None:
                     da_conv_df = da_conv_df.groupby('전환유형', as_index=False)['전환수'].sum()
+                    st.caption(f"✅ DA 전환 데이터 파싱 완료: {da_conv_df.to_dict('records')}")
+                else:
+                    st.caption("⚠️ DA 전환 파일 없음 또는 파싱 실패")
 
                 # 전월 전환 CSV (선택) — 있으면 페이지조회 제외한 정확한 버튼 전환율 계산
                 prev_sa_conv_df = None
