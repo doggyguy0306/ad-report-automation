@@ -195,33 +195,41 @@ st.divider()
 
 # ── 보고서 기간 설정 ──────────────────────────────────────
 st.markdown("### 📅 보고서 기간 설정")
-st.caption("업로드한 전체 데이터 중 보고서로 만들 기간을 선택하세요. 전월 동기간은 자동으로 계산됩니다.")
+st.caption("이번 기간과 비교 기간을 각각 직접 선택하세요. 기본값은 이번 달 전체 / 지난 달 전체입니다.")
 
-this_month = date.today().replace(day=1)
-last_day_of_month = (this_month + relativedelta(months=1) - relativedelta(days=1))
+this_month      = date.today().replace(day=1)
+last_day_curr   = this_month + relativedelta(months=1) - relativedelta(days=1)
+prev_month_first = this_month - relativedelta(months=1)
+prev_month_last  = this_month - relativedelta(days=1)   # 이번달 1일 - 1일 = 전월 말일
 
-dcol1, dcol2 = st.columns(2)
-with dcol1:
+period_col1, period_col2 = st.columns(2)
+
+with period_col1:
+    st.markdown("**📊 이번 기간**")
     report_start = st.date_input(
-        "보고서 시작일",
-        value=this_month,
-        help="보고서를 만들 기간의 첫째 날"
+        "시작일", value=this_month, key="report_start",
+        help="보고서 대상 기간의 첫째 날"
     )
-with dcol2:
     report_end = st.date_input(
-        "보고서 종료일",
-        value=last_day_of_month,
-        help="보고서를 만들 기간의 마지막 날"
+        "종료일", value=last_day_curr, key="report_end",
+        help="보고서 대상 기간의 마지막 날"
     )
 
-# 전월 동기간 자동 계산 및 안내
-prev_start = report_start - relativedelta(months=1)
-prev_end   = report_end   - relativedelta(months=1)
+with period_col2:
+    st.markdown("**🔄 비교 기간 (전월)**")
+    prev_start = st.date_input(
+        "시작일", value=prev_month_first, key="prev_start",
+        help="비교할 기간의 첫째 날 (보통 전월 1일)"
+    )
+    prev_end = st.date_input(
+        "종료일", value=prev_month_last, key="prev_end",
+        help="비교할 기간의 마지막 날 (보통 전월 말일)"
+    )
 
 st.info(
-    f"📊 **보고서 기간:** {report_start.strftime('%Y.%m.%d')} ~ {report_end.strftime('%Y.%m.%d')}"
+    f"📊 **이번 기간:** {report_start.strftime('%Y.%m.%d')} ~ {report_end.strftime('%Y.%m.%d')}"
     f"　　"
-    f"🔄 **전월 동기간 (자동):** {prev_start.strftime('%Y.%m.%d')} ~ {prev_end.strftime('%Y.%m.%d')}"
+    f"🔄 **비교 기간:** {prev_start.strftime('%Y.%m.%d')} ~ {prev_end.strftime('%Y.%m.%d')}"
 )
 
 st.divider()
