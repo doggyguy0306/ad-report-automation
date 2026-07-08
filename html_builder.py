@@ -609,7 +609,7 @@ def _kpi_card(label, value, sub='', color=C_NAVY, mom=None):
 
 
 def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id,
-                         bar_data=None):
+                         bar_data=None, prev_label='전월'):
     """상세보기 토글이 있는 KPI 카드.
     detail_rows: [(매체명, 값, sub문자열, color, mom_tuple_or_None), ...]
     bar_data: (prev_val, curr_val, fmt) — 미니 막대그래프 표시용 (전월 데이터 있을 때만)
@@ -618,7 +618,7 @@ def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id,
     if mom:
         mom_str, mom_color = mom
         mom_html = (f'<div class="kpi-mom" style="color:{mom_color}">'
-                    f'전월 동기간 대비 {mom_str}</div>')
+                    f'{prev_label} 동기간 대비 {mom_str}</div>')
 
     # 미니 막대그래프 (전월 데이터 있을 때만)
     chart_html = ''
@@ -634,7 +634,7 @@ def _kpi_card_expandable(label, value, sub, color, mom, detail_rows, card_id,
         if m_mom:
             mm_str, mm_color = m_mom
             m_mom_html = (f'<span class="kpi-dr-mom" style="color:{mm_color}">'
-                          f'전월 {mm_str}</span>')
+                          f'{prev_label} {mm_str}</span>')
         detail_html += (
             f'<div class="kpi-detail-row">'
             f'<span class="kpi-dr-label" style="color:{m_color}">{m_label}</span>'
@@ -1341,6 +1341,7 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
         p_post_count  = len(prev_ig_media_df)
         p_total_likes = int(prev_ig_media_df['좋아요'].sum()) if '좋아요' in prev_ig_media_df.columns else 0
         p_total_saved = int(prev_ig_media_df['저장수'].sum()) if '저장수' in prev_ig_media_df.columns else 0
+        p_total_views = int(prev_ig_media_df['조회수'].sum()) if '조회수' in prev_ig_media_df.columns else 0
         # 전월 도달수 + 조회수 일별 집계
         _p_tmp = prev_ig_media_df.copy()
         _p_tmp['날짜'] = pd.to_datetime(_p_tmp['날짜']).dt.normalize()
@@ -1358,8 +1359,17 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
         _p_posting = p_daily[p_daily['도달수'] > 0] if '도달수' in p_daily.columns else pd.DataFrame()
         p_avg_reach = _p_posting['도달수'].mean() if not _p_posting.empty else 0
     else:
-        p_post_count = p_total_likes = p_total_saved = 0
+        p_post_count = p_total_likes = p_total_saved = p_total_views = 0
         p_total_reach = p_avg_reach = 0
+
+    # ── 월 레이블 도출 ────────────────────────────
+    def _ig_month_label(df):
+        if df is None or df.empty: return None
+        try:
+            return f"{pd.to_datetime(df['날짜'].min()).month}월"
+        except: return None
+    curr_label = _ig_month_label(ig_media_df) or '이번달'
+    prev_label = (_ig_month_label(prev_ig_media_df) if has_prev_ig else None) or '전월'
 
     def _ig_mom_badge(curr, prev):
         """전월 대비 뱃지 HTML"""
@@ -1384,66 +1394,96 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
         post_count   = len(ig_media_df) if ig_media_df is not None and not ig_media_df.empty else 0
         total_likes  = int(ig_media_df['좋아요'].sum()) if ig_media_df is not None and '좋아요' in ig_media_df.columns else 0
         total_saved  = int(ig_media_df['저장수'].sum()) if ig_media_df is not None and '저장수' in ig_media_df.columns else 0
+        total_views  = int(ig_media_df['조회수'].sum()) if ig_media_df is not None and '조회수' in ig_media_df.columns else 0
         # 팔로워 수: CSV에 컬럼 있으면 사용
         follower_cnt = int(ig_media_df['팔로워수'].iloc[0]) if ig_media_df is not None and '팔로워수' in ig_media_df.columns else None
 
-        def _ig_card(label, value, sub='', mom_html=''):
+        def _ig_info_card(label, value, sub=''):
             return (f'<div style="background:#FDF2F8;border:1px solid #F0B8D4;'
-                    f'border-radius:10px;padding:16px;text-align:center">'
+                    f'border-radius:10px;padding:16px;text-align:center;flex:1">'
                     f'<div style="font-size:11px;color:{C_IG};font-weight:600;margin-bottom:6px">{label}</div>'
                     f'<div style="font-size:24px;font-weight:700;color:#333">{value}</div>'
                     f'<div style="font-size:11px;color:#888;margin-top:4px">{sub}</div>'
-                    f'{mom_html}</div>')
+                    f'</div>')
 
-        # 팔로워수 → 게시물수 → 총좋아요  /  도달수 → 일평균 → 최고도달일
-        row1 = (
-            (_ig_card('팔로워 수', _f(follower_cnt), '현재 기준') if follower_cnt is not None
-             else _ig_card('총 저장수', _f(total_saved), '기간 합산',
-                           _ig_mom_badge(total_saved, p_total_saved))) +
-            _ig_card('게시물 수', f'{post_count}개', '기간 중 업로드',
-                     _ig_mom_badge(post_count, p_post_count)) +
-            _ig_card('총 좋아요', _f(total_likes), '기간 합산',
-                     _ig_mom_badge(total_likes, p_total_likes))
+        # [A] 상단 info 카드 2개
+        info_follower = (
+            _ig_info_card('팔로워 수', _f(follower_cnt), '현재 기준') if follower_cnt is not None
+            else _ig_info_card('총 저장수', _f(total_saved), '기간 합산')
         )
-        row2 = (
-            _ig_card('기간 총 도달수', _f(total_reach), '게시물 도달 합산',
-                     _ig_mom_badge(total_reach, p_total_reach)) +
-            _ig_card('일 평균 도달수', _f(avg_reach), '게시물 올린 날 기준',
-                     _ig_mom_badge(avg_reach, p_avg_reach)) +
-            _ig_card('최고 도달일',
-                     max_day['날짜'].strftime('%m/%d') if max_day is not None else '-',
-                     f'{_f(max_day["도달수"])}명 도달' if max_day is not None else '')
+        info_max_day = _ig_info_card(
+            '최고 도달일',
+            max_day['날짜'].strftime('%m/%d') if max_day is not None else '-',
+            f'{_f(max_day["도달수"])}명 도달' if max_day is not None else ''
+        )
+        parts.append(
+            f'<div style="display:flex;gap:14px;margin-bottom:16px">'
+            f'{info_follower}{info_max_day}'
+            f'</div>'
         )
 
-        # 전월 대비 헤더 뱃지
-        mom_header = (
-            f'<div style="display:inline-block;background:#F0FDF4;border:1px solid #86EFAC;'
-            f'border-radius:6px;padding:4px 10px;font-size:11px;color:#16A34A;'
-            f'font-weight:600;margin-bottom:10px">📊 전월 대비 비교 표시 중</div>'
-        ) if has_prev_ig else ''
+        # [B] 이번달 vs 전월 비교 바차트 2개 나란히
+        if has_prev_ig:
+            # 참여 지표
+            eng_chart = _svg_bar_grouped(
+                ['게시물 수', '좋아요', '저장수'],
+                [(curr_label, [float(post_count), float(total_likes), float(total_saved)], C_IG),
+                 (prev_label, [float(p_post_count), float(p_total_likes), float(p_total_saved)], '#F0B8D4')],
+            )
+            # 도달 지표
+            if total_views > 0 or p_total_views > 0:
+                reach_labels = ['총 도달수', '일평균 도달수', '총 조회수']
+                reach_curr_vals = [float(total_reach), float(avg_reach), float(total_views)]
+                reach_prev_vals = [float(p_total_reach), float(p_avg_reach), float(p_total_views)]
+            else:
+                reach_labels = ['총 도달수', '일평균 도달수']
+                reach_curr_vals = [float(total_reach), float(avg_reach)]
+                reach_prev_vals = [float(p_total_reach), float(p_avg_reach)]
+            reach_chart = _svg_bar_grouped(
+                reach_labels,
+                [(curr_label, reach_curr_vals, C_IG),
+                 (prev_label, reach_prev_vals, '#F0B8D4')],
+            )
+            parts.append(
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
+                f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
+                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">참여 지표</div>'
+                f'{eng_chart}</div>'
+                f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
+                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">도달 지표</div>'
+                f'{reach_chart}</div>'
+                f'</div>'
+            )
+        else:
+            # has_prev_ig가 False인 경우: 4개 메트릭 4-column grid
+            def _ig_metric_card(label, value, sub=''):
+                return (f'<div style="background:#FDF2F8;border:1px solid #F0B8D4;'
+                        f'border-radius:10px;padding:14px;text-align:center">'
+                        f'<div style="font-size:11px;color:{C_IG};font-weight:600;margin-bottom:6px">{label}</div>'
+                        f'<div style="font-size:20px;font-weight:700;color:#333">{value}</div>'
+                        f'<div style="font-size:11px;color:#888;margin-top:4px">{sub}</div>'
+                        f'</div>')
+            metric_cards = (
+                _ig_metric_card('게시물 수', f'{post_count}개', '기간 중 업로드') +
+                _ig_metric_card('총 좋아요', _f(total_likes), '기간 합산') +
+                _ig_metric_card('총 도달수', _f(total_reach), '게시물 도달 합산') +
+                _ig_metric_card('일평균 도달수', _f(avg_reach), '게시물 올린 날 기준')
+            )
+            parts.append(
+                f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px">'
+                f'{metric_cards}</div>'
+            )
 
-        summary_html = (
-            mom_header +
-            f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:10px">{row1}</div>'
-            f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">{row2}</div>'
-        )
-        parts.append(summary_html)
-
-        # 일별 도달수 + 조회수 듀얼 라인 차트
+        # [C] 일별 도달수 추이 라인 차트 (이번달만, 전월 파선 없음)
         dates   = [str(d)[:10] for d in ig_account_df['날짜'].tolist()]
         reach_v = ig_account_df['도달수'].tolist()
         views_v = ig_account_df['조회수'].tolist() if '조회수' in ig_account_df.columns else [0]*len(reach_v)
-        # 전월 데이터 준비 (있으면 파선 오버레이)
-        p_reach_v = p_views_v = None
-        if prev_ig_account_df is not None and not prev_ig_account_df.empty:
-            p_reach_v = prev_ig_account_df['도달수'].tolist()
-            p_views_v = prev_ig_account_df['조회수'].tolist() if '조회수' in prev_ig_account_df.columns else [0]*len(p_reach_v)
-        chart_title_note = ' (실선: 이번달 · 파선: 전월)' if p_reach_v else ''
-        chart   = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수',
-                                  prev_vals1=p_reach_v, prev_vals2=p_views_v)
-        parts.append(f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;margin-bottom:16px">'
-                     f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:8px">📈 일별 도달수 · 조회수 추이{chart_title_note}</div>'
-                     f'{chart}</div>')
+        chart = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수')
+        parts.append(
+            f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;margin-bottom:16px">'
+            f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:8px">📈 일별 도달수 · 조회수 추이 ({curr_label})</div>'
+            f'{chart}</div>'
+        )
 
     # ── 게시물별 성과 테이블 ────────────────────────
     if ig_media_df is not None and not ig_media_df.empty:
@@ -1454,29 +1494,38 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
 
         rows_html = ''
         type_icon = {'IMAGE': '🖼', 'VIDEO': '🎬', 'CAROUSEL_ALBUM': '📸'}
-        for _, row in df.head(15).iterrows():
+        for _, row in df.iterrows():
             날짜 = str(row.get('날짜', ''))[:10]
             유형 = row.get('유형', '')
             icon = type_icon.get(유형, '📄')
             caption = str(row.get('캡션', ''))[:30] or '(캡션 없음)'
-            likes   = _f(row.get('좋아요', 0))
-            comments= _f(row.get('댓글', 0))
-            reach   = _f(row.get('도달수', 0))
+            likes_val   = int(row.get('좋아요', 0) or 0)
+            comments_val= int(row.get('댓글', 0) or 0)
+            reach_val   = int(row.get('도달수', 0) or 0)
             saved   = _f(row.get('저장수', 0))
-            rows_html += f'''<tr>
+            rows_html += f'''<tr class="ig-post-row" data-reach="{reach_val}" data-likes="{likes_val}" data-comments="{comments_val}">
               <td style="padding:8px 10px;font-size:12px;color:#555">{날짜}</td>
               <td style="padding:8px 10px;font-size:12px">{icon} {유형.replace("CAROUSEL_ALBUM","카루셀").replace("IMAGE","이미지").replace("VIDEO","동영상")}</td>
               <td style="padding:8px 10px;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{caption}</td>
-              <td style="padding:8px 10px;font-size:12px;text-align:right;color:{C_IG};font-weight:600">{reach}</td>
-              <td style="padding:8px 10px;font-size:12px;text-align:right">❤️ {likes}</td>
-              <td style="padding:8px 10px;font-size:12px;text-align:right">💬 {comments}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right;color:{C_IG};font-weight:600">{_f(reach_val)}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right">❤️ {_f(likes_val)}</td>
+              <td style="padding:8px 10px;font-size:12px;text-align:right">💬 {_f(comments_val)}</td>
               <td style="padding:8px 10px;font-size:12px;text-align:right">🔖 {saved}</td>
             </tr>'''
 
         parts.append(f'''
         <div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;overflow-x:auto">
           <div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:12px">
-            📸 게시물별 성과 (도달수 상위 15개)
+            📸 게시물별 성과 (전체 {len(df)}개)
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span style="font-size:12px;color:#666">정렬 기준:</span>
+            <select id="ig-sort-key" onchange="igSortPosts()"
+              style="font-size:12px;padding:4px 8px;border:1px solid #F0B8D4;border-radius:6px;color:#333;cursor:pointer">
+              <option value="reach">도달수</option>
+              <option value="likes">좋아요</option>
+              <option value="comments">댓글</option>
+            </select>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
@@ -1490,9 +1539,18 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
                 <th style="padding:8px 10px;text-align:right">저장</th>
               </tr>
             </thead>
-            <tbody>{rows_html}</tbody>
+            <tbody id="ig-post-tbody">{rows_html}</tbody>
           </table>
-        </div>''')
+        </div>
+        <script>
+        function igSortPosts(){{
+          var key=document.getElementById("ig-sort-key").value;
+          var tbody=document.getElementById("ig-post-tbody");
+          var rows=Array.from(tbody.querySelectorAll("tr.ig-post-row"));
+          rows.sort(function(a,b){{return parseInt(b.dataset[key]||0)-parseInt(a.dataset[key]||0);}});
+          rows.forEach(function(r){{tbody.appendChild(r);}});
+        }}
+        </script>''')
 
     # ── 콘텐츠 성과 시사점 ──────────────────────
     if ig_media_df is not None and not ig_media_df.empty:
@@ -1645,6 +1703,15 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         p_gda_비용   = p_gda_df['비용'].sum()
         p_meta_비용  = p_meta_df['비용'].sum()
 
+    # 기간 월 레이블 자동 도출
+    def _month_label(df):
+        if df is None or df.empty: return None
+        try:
+            return f"{pd.to_datetime(df['날짜'].min()).month}월"
+        except: return None
+    _curr_mon = _month_label(raw_df) or '이번달'
+    _prev_mon = (_month_label(prev_raw_df) if has_prev else None) or '전월'
+
     # ── KPI 카드 (전체 5개 + 매체별 상세 펼침) ─
     def _mom(curr, prev): return _pct_mom(curr, prev) if has_prev else None
 
@@ -1721,7 +1788,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🟢 네이버',   _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER,  _mom(naver_노출, p_naver_노출)),
                 ('🔵 구글 SA',  _f(gsa_노출),   f'비중 {_fp(gsa_노출,   total_노출)}', C_GOOGLE, _mom(gsa_노출,   p_gsa_노출)),
                 ('🔴 구글 DA',  _f(gda_노출),   f'비중 {_fp(gda_노출,   total_노출)}', C_DA,     _mom(gda_노출,   p_gda_노출)),
-            ] + ([('🔷 Meta', _f(meta_노출), f'비중 {_fp(meta_노출, total_노출)}', C_META, _mom(meta_노출, p_meta_노출))] if has_meta else [])
+            ] + ([('🔷 Meta', _f(meta_노출), f'비중 {_fp(meta_노출, total_노출)}', C_META, _mom(meta_노출, p_meta_노출))] if has_meta else []),
+            prev_label=_prev_mon
         ) +
         _kpi_card_expandable(
             label='전체 클릭', value=_f(total_클릭), sub=f'전체 비중 100%',
@@ -1732,7 +1800,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🟢 네이버',   _f(naver_클릭), f'비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,  _mom(naver_클릭, p_naver_클릭)),
                 ('🔵 구글 SA',  _f(gsa_클릭),   f'비중 {_fp(gsa_클릭,   total_클릭)}', C_GOOGLE, _mom(gsa_클릭,   p_gsa_클릭)),
                 ('🔴 구글 DA',  _f(gda_클릭),   f'비중 {_fp(gda_클릭,   total_클릭)}', C_DA,     _mom(gda_클릭,   p_gda_클릭)),
-            ] + ([('🔷 Meta', _f(meta_클릭), f'비중 {_fp(meta_클릭, total_클릭)}', C_META, _mom(meta_클릭, p_meta_클릭))] if has_meta else [])
+            ] + ([('🔷 Meta', _f(meta_클릭), f'비중 {_fp(meta_클릭, total_클릭)}', C_META, _mom(meta_클릭, p_meta_클릭))] if has_meta else []),
+            prev_label=_prev_mon
         ) +
         _kpi_card_expandable(
             label='전체 광고비', value=f'₩{_f(total_비용)}',
@@ -1744,7 +1813,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🟢 네이버',   f'₩{_f(naver_비용)}', f'비중 {_fp(naver_비용, total_비용)}', C_NAVER,  _mom(naver_비용, p_naver_비용)),
                 ('🔵 구글 SA',  f'₩{_f(gsa_비용)}',   f'비중 {_fp(gsa_비용,   total_비용)}', C_GOOGLE, _mom(gsa_비용,   p_gsa_비용)),
                 ('🔴 구글 DA',  f'₩{_f(gda_비용)}',   f'비중 {_fp(gda_비용,   total_비용)}', C_DA,     _mom(gda_비용,   p_gda_비용)),
-            ] + ([('🔷 Meta', f'₩{_f(meta_비용)}', f'비중 {_fp(meta_비용, total_비용)}', C_META, _mom(meta_비용, p_meta_비용))] if has_meta else [])
+            ] + ([('🔷 Meta', f'₩{_f(meta_비용)}', f'비중 {_fp(meta_비용, total_비용)}', C_META, _mom(meta_비용, p_meta_비용))] if has_meta else []),
+            prev_label=_prev_mon
         ) +
         _kpi_card_expandable(
             label='전체 CTR', value=f'{total_CTR:.2f}%',
@@ -1756,7 +1826,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🟢 네이버',   f'{naver_CTR:.2f}%', f'클릭 {_f(naver_클릭)}', C_NAVER,  _mom(naver_CTR, p_naver_CTR)),
                 ('🔵 구글 SA',  f'{gsa_CTR:.2f}%',   f'클릭 {_f(gsa_클릭)}',   C_GOOGLE, _mom(gsa_CTR,   p_gsa_CTR)),
                 ('🔴 구글 DA',  f'{gda_CTR:.2f}%',   f'클릭 {_f(gda_클릭)}',   C_DA,     _mom(gda_CTR,   p_gda_CTR)),
-            ] + ([('🔷 Meta', f'{meta_CTR:.2f}%', f'클릭 {_f(meta_클릭)}', C_META, _mom(meta_CTR, p_meta_CTR))] if has_meta else [])
+            ] + ([('🔷 Meta', f'{meta_CTR:.2f}%', f'클릭 {_f(meta_클릭)}', C_META, _mom(meta_CTR, p_meta_CTR))] if has_meta else []),
+            prev_label=_prev_mon
         ) +
         _kpi_card_expandable(
             label='평균 CPC', value=f'₩{_f(total_CPC)}',
@@ -1768,7 +1839,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🟢 네이버',   f'₩{_f(naver_CPC)}', f'비용 {_f(naver_비용)}', C_NAVER,  _mom(naver_CPC, p_naver_CPC)),
                 ('🔵 구글 SA',  f'₩{_f(gsa_CPC)}',   f'비용 {_f(gsa_비용)}',   C_GOOGLE, _mom(gsa_CPC,   p_gsa_CPC)),
                 ('🔴 구글 DA',  f'₩{_f(gda_CPC)}',   f'비용 {_f(gda_비용)}',   C_DA,     _mom(gda_CPC,   p_gda_CPC)),
-            ] + ([('🔷 Meta', f'₩{_f(meta_CPC)}', f'비용 {_f(meta_비용)}', C_META, _mom(meta_CPC, p_meta_CPC))] if has_meta else [])
+            ] + ([('🔷 Meta', f'₩{_f(meta_CPC)}', f'비용 {_f(meta_비용)}', C_META, _mom(meta_CPC, p_meta_CPC))] if has_meta else []),
+            prev_label=_prev_mon
         ) +
         _kpi_card_expandable(
             label='버튼 전환율', value=f'{total_전환율:.2f}%',
@@ -1780,7 +1852,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ('🟢 네이버',   f'{_f(naver_버튼전환)}건', f'전환율 {naver_전환율:.2f}%', C_NAVER,  _mom(naver_전환율, p_naver_전환율)),
                 ('🔵 구글 SA',  f'{_f(sa_버튼전환)}건',    f'전환율 {gsa_전환율:.2f}%',   C_GOOGLE, _mom(gsa_전환율,   p_gsa_전환율)),
                 ('🔴 구글 DA',  f'{_f(da_버튼전환)}건',    f'전환율 {gda_전환율:.2f}%',   C_DA,     _mom(gda_전환율,   p_gda_전환율)),
-            ] + ([('🔷 Meta', f'{_f(meta_버튼전환)}건', f'전환율 {meta_전환율:.2f}%', C_META, _mom(meta_전환율, p_meta_전환율))] if has_meta else [])
+            ] + ([('🔷 Meta', f'{_f(meta_버튼전환)}건', f'전환율 {meta_전환율:.2f}%', C_META, _mom(meta_전환율, p_meta_전환율))] if has_meta else []),
+            prev_label=_prev_mon
         )
     )
     kpi_section = f'<div class="kpi-grid-6">{kpi_html}</div>'
@@ -1970,7 +2043,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     )
 
     # ── 버튼 전환 섹션 ─────────────────────
-    def _conv_block(cd, 클릭수, label, color, prev_cd=None, prev_클릭수=0):
+    def _conv_block(cd, 클릭수, label, color, prev_cd=None, prev_클릭수=0,
+                    curr_label='이번달', prev_label='전월'):
         if not cd: return ''
         상세 = cd.get('상세보기_버튼클릭', 0)
         예약 = cd.get('상담예약_버튼클릭', 0)
@@ -1993,7 +2067,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                 ['상담신청', f'{_f(신청)}건', _fp(신청, 클릭수),  f'{_f(p신청)}건', _fp(p신청, prev_클릭수), _d(신청, p신청)],
                 ['합계',     f'{_f(합계)}건', _fp(합계, 클릭수),  f'{_f(p합계)}건', _fp(p합계, prev_클릭수), _d(합계, p합계)],
             ]
-            tbl = _table_html(['전환 유형', '이번달', '이번달 전환율', '전월', '전월 전환율', '증감'], rows)
+            tbl = _table_html(['전환 유형', curr_label, f'{curr_label} 전환율', prev_label, f'{prev_label} 전환율', '증감'], rows)
         else:
             rows = [
                 ['상세보기 버튼클릭', _f(상세), _fp(상세, 클릭수)],
@@ -2005,8 +2079,10 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
 
         return f'<div class="sub-title">{label} 버튼 전환</div>{tbl}'
 
-    sa_conv_content = _conv_block(sa_cd, gsa_클릭, 'SA', C_GOOGLE, prev_cd=p_sa_cd, prev_클릭수=p_gsa_클릭)
-    da_conv_content = _conv_block(da_cd, gda_클릭, 'DA', C_DA,     prev_cd=p_da_cd, prev_클릭수=p_gda_클릭)
+    sa_conv_content = _conv_block(sa_cd, gsa_클릭, 'SA', C_GOOGLE, prev_cd=p_sa_cd, prev_클릭수=p_gsa_클릭,
+                                   curr_label=_curr_mon, prev_label=_prev_mon)
+    da_conv_content = _conv_block(da_cd, gda_클릭, 'DA', C_DA,     prev_cd=p_da_cd, prev_클릭수=p_gda_클릭,
+                                   curr_label=_curr_mon, prev_label=_prev_mon)
 
     # SA vs DA 비교 바차트 (전월 데이터 있으면 이번달 vs 전월 함께 표시)
     btn_labels = ['상세보기', '상담예약', '상담신청']
@@ -2017,10 +2093,10 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         p_da_vals = [p_da_cd.get('상세보기_버튼클릭',0), p_da_cd.get('상담예약_버튼클릭',0), p_da_cd.get('상담신청_버튼클릭',0)]
         svg_conv_bar = _svg_bar_grouped(
             btn_labels,
-            [('SA 이번달', sa_vals, C_GOOGLE), ('SA 전월', p_sa_vals, '#A8C4F5'),
-             ('DA 이번달', da_vals, C_DA),     ('DA 전월', p_da_vals, '#F2A9A2')],
+            [(f'SA {_curr_mon}', sa_vals, C_GOOGLE), (f'SA {_prev_mon}', p_sa_vals, '#A8C4F5'),
+             (f'DA {_curr_mon}', da_vals, C_DA),     (f'DA {_prev_mon}', p_da_vals, '#F2A9A2')],
         )
-        conv_chart_title = 'SA · DA 버튼 전환 — 이번달 vs 전월'
+        conv_chart_title = f'SA · DA 버튼 전환 — {_curr_mon} vs {_prev_mon}'
     else:
         svg_conv_bar = _svg_bar_grouped(
             btn_labels,
