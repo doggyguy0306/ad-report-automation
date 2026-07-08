@@ -129,8 +129,11 @@ def _svg_line(dates, values, color, title=''):
             f'{pts_svg}{x_lbl}</svg>')
 
 
-def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''):
-    """도달수 + 조회수 2개 라인 SVG 차트 (전체 날짜 + 호버 툴팁)"""
+def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title='',
+                   prev_vals1=None, prev_vals2=None):
+    """도달수 + 조회수 2개 라인 SVG 차트 (전체 날짜 + 호버 툴팁)
+    prev_vals1/prev_vals2: 전월 값 (있으면 파선으로 함께 표시)
+    """
     W, H = 780, 360
     PL, PR, PT, PB = 52, 12, (55 if title else 20), 88
     cw, ch = W - PL - PR, H - PT - PB
@@ -139,11 +142,19 @@ def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''
         return (f'<svg width="{W}" height="{H}"><text x="50%" y="50%" '
                 f'text-anchor="middle" fill="#aaa">데이터 없음</text></svg>')
 
+    has_prev_chart = prev_vals1 is not None and len(prev_vals1) > 0
+    np_ = len(prev_vals1) if has_prev_chart else 0
+
     all_vals = list(vals1) + list(vals2)
+    if has_prev_chart:
+        all_vals += list(prev_vals1)
+        if prev_vals2:
+            all_vals += list(prev_vals2)
     max_v = max(all_vals) * 1.15 if max(all_vals) > 0 else 1
     rng = max_v or 1
 
     def px(i): return PL + (i / (n - 1)) * cw if n > 1 else PL + cw / 2
+    def px_p(i): return PL + (i / (np_ - 1)) * cw if np_ > 1 else PL + cw / 2
     def py(v): return PT + (1 - v / rng) * ch
 
     # 격자선 + Y레이블
@@ -156,14 +167,22 @@ def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''
                  f'<text x="{PL-6}" y="{gy+4:.1f}" text-anchor="end" '
                  f'font-size="10" fill="{C_MUTED}">{_f(gv)}</text>')
 
-    def _line_area(vals, color, opacity):
-        area = f'{PL:.1f},{PT+ch:.1f}'
-        for i, v in enumerate(vals): area += f' {px(i):.1f},{py(v):.1f}'
-        area += f' {px(n-1):.1f},{PT+ch:.1f}'
-        pts  = ' '.join(f'{px(i):.1f},{py(v):.1f}' for i, v in enumerate(vals))
+    def _line_area(vals, color, opacity, pxfn=None):
+        if pxfn is None: pxfn = px
+        nn = len(vals)
+        area = f'{pxfn(0):.1f},{PT+ch:.1f}'
+        for i, v in enumerate(vals): area += f' {pxfn(i):.1f},{py(v):.1f}'
+        area += f' {pxfn(nn-1):.1f},{PT+ch:.1f}'
+        pts  = ' '.join(f'{pxfn(i):.1f},{py(v):.1f}' for i, v in enumerate(vals))
         return (f'<polygon points="{area}" fill="{color}" opacity="{opacity}"/>'
                 f'<polyline points="{pts}" fill="none" stroke="{color}" '
                 f'stroke-width="2.5" stroke-linejoin="round"/>')
+
+    def _dashed_line(vals, color, pxfn=None):
+        if pxfn is None: pxfn = px_p
+        pts = ' '.join(f'{pxfn(i):.1f},{py(v):.1f}' for i, v in enumerate(vals))
+        return (f'<polyline points="{pts}" fill="none" stroke="{color}" '
+                f'stroke-width="1.8" stroke-dasharray="5,3" stroke-linejoin="round" opacity="0.55"/>')
 
     # 점 + 호버 영역 (각 포인트마다 투명 rect)
     dots_hover = ''
@@ -198,18 +217,39 @@ def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''
 
     # 범례
     lx = PL + 10
-    legend = (
-        f'<circle cx="{lx+7}" cy="22" r="5" fill="{color1}"/>'
-        f'<text x="{lx+16}" y="26" font-size="11" font-weight="600" fill="{color1}">{label1}</text>'
-        f'<circle cx="{lx+80}" cy="22" r="5" fill="{color2}"/>'
-        f'<text x="{lx+89}" y="26" font-size="11" font-weight="600" fill="{color2}">{label2}</text>'
-    )
+    ly = 22
+    if has_prev_chart:
+        legend = (
+            f'<circle cx="{lx+7}" cy="{ly}" r="5" fill="{color1}"/>'
+            f'<text x="{lx+16}" y="{ly+4}" font-size="10" font-weight="600" fill="{color1}">이번달 {label1}</text>'
+            f'<circle cx="{lx+115}" cy="{ly}" r="5" fill="{color2}"/>'
+            f'<text x="{lx+124}" y="{ly+4}" font-size="10" font-weight="600" fill="{color2}">이번달 {label2}</text>'
+            f'<line x1="{lx+220}" y1="{ly}" x2="{lx+240}" y2="{ly}" stroke="{color1}" stroke-width="1.8" stroke-dasharray="4,2" opacity="0.6"/>'
+            f'<text x="{lx+244}" y="{ly+4}" font-size="10" fill="{C_MUTED}">전월 {label1}</text>'
+            f'<line x1="{lx+320}" y1="{ly}" x2="{lx+340}" y2="{ly}" stroke="{color2}" stroke-width="1.8" stroke-dasharray="4,2" opacity="0.6"/>'
+            f'<text x="{lx+344}" y="{ly+4}" font-size="10" fill="{C_MUTED}">전월 {label2}</text>'
+        )
+    else:
+        legend = (
+            f'<circle cx="{lx+7}" cy="{ly}" r="5" fill="{color1}"/>'
+            f'<text x="{lx+16}" y="{ly+4}" font-size="11" font-weight="600" fill="{color1}">{label1}</text>'
+            f'<circle cx="{lx+80}" cy="{ly}" r="5" fill="{color2}"/>'
+            f'<text x="{lx+89}" y="{ly+4}" font-size="11" font-weight="600" fill="{color2}">{label2}</text>'
+        )
     title_svg = ((f'<text x="{W/2}" y="32" text-anchor="middle" font-size="14" '
                   f'font-weight="bold" fill="{C_NAVY}">{title}</text>') if title else '')
+
+    # 전월 파선 (채우기 없이 선만)
+    prev_lines = ''
+    if has_prev_chart:
+        prev_lines = _dashed_line(prev_vals1, color1)
+        if prev_vals2:
+            prev_lines += _dashed_line(prev_vals2, color2)
 
     return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
             f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
             f'{title_svg}{legend}{grid}{axes}'
+            f'{prev_lines}'
             f'{_line_area(vals1, color1, 0.10)}'
             f'{_line_area(vals2, color2, 0.07)}'
             f'{dots_hover}{x_lbl}</svg>')
@@ -1296,15 +1336,24 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
 
     # ── 전월 지표 사전 계산 ─────────────────────────
     has_prev_ig = prev_ig_media_df is not None and not prev_ig_media_df.empty
+    prev_ig_account_df = None
     if has_prev_ig:
         p_post_count  = len(prev_ig_media_df)
         p_total_likes = int(prev_ig_media_df['좋아요'].sum()) if '좋아요' in prev_ig_media_df.columns else 0
         p_total_saved = int(prev_ig_media_df['저장수'].sum()) if '저장수' in prev_ig_media_df.columns else 0
-        # 전월 도달수 합산
+        # 전월 도달수 + 조회수 일별 집계
         _p_tmp = prev_ig_media_df.copy()
         _p_tmp['날짜'] = pd.to_datetime(_p_tmp['날짜']).dt.normalize()
         _p_agg = {'도달수': 'sum'}
-        p_daily = _p_tmp.groupby('날짜', as_index=False).agg(_p_agg)
+        if '조회수' in _p_tmp.columns:
+            _p_agg['조회수'] = 'sum'
+        p_daily = _p_tmp.groupby('날짜', as_index=False).agg(_p_agg).sort_values('날짜')
+        # 전월 날짜 범위 채우기
+        if not p_daily.empty:
+            _p_range = pd.date_range(start=p_daily['날짜'].min(), end=p_daily['날짜'].max(), freq='D')
+            p_daily = p_daily.set_index('날짜').reindex(_p_range, fill_value=0).reset_index()
+            p_daily.rename(columns={'index': '날짜'}, inplace=True)
+            prev_ig_account_df = p_daily
         p_total_reach = p_daily['도달수'].sum() if '도달수' in p_daily.columns else 0
         _p_posting = p_daily[p_daily['도달수'] > 0] if '도달수' in p_daily.columns else pd.DataFrame()
         p_avg_reach = _p_posting['도달수'].mean() if not _p_posting.empty else 0
@@ -1384,9 +1433,16 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
         dates   = [str(d)[:10] for d in ig_account_df['날짜'].tolist()]
         reach_v = ig_account_df['도달수'].tolist()
         views_v = ig_account_df['조회수'].tolist() if '조회수' in ig_account_df.columns else [0]*len(reach_v)
-        chart   = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수')
+        # 전월 데이터 준비 (있으면 파선 오버레이)
+        p_reach_v = p_views_v = None
+        if prev_ig_account_df is not None and not prev_ig_account_df.empty:
+            p_reach_v = prev_ig_account_df['도달수'].tolist()
+            p_views_v = prev_ig_account_df['조회수'].tolist() if '조회수' in prev_ig_account_df.columns else [0]*len(p_reach_v)
+        chart_title_note = ' (실선: 이번달 · 파선: 전월)' if p_reach_v else ''
+        chart   = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수',
+                                  prev_vals1=p_reach_v, prev_vals2=p_views_v)
         parts.append(f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;margin-bottom:16px">'
-                     f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:8px">📈 일별 도달수 · 조회수 추이</div>'
+                     f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:8px">📈 일별 도달수 · 조회수 추이{chart_title_note}</div>'
                      f'{chart}</div>')
 
     # ── 게시물별 성과 테이블 ────────────────────────
