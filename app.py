@@ -351,6 +351,7 @@ if generate:
                             _m['디바이스'] = '전체'
                         common_cols = [c for c in ['날짜', '매체', '디바이스', '노출', '클릭', '비용', '전환', 'CTR', 'CPC'] if c in _m.columns]
                         _m_filtered = _m[common_cols]
+                        # 이번 기간
                         mask_meta = (
                             (_m_filtered['날짜'] >= pd.Timestamp(report_start)) &
                             (_m_filtered['날짜'] <= pd.Timestamp(report_end))
@@ -362,19 +363,52 @@ if generate:
                             st.caption(f"✅ Meta 광고 데이터 {len(meta_filtered)}일치 포함")
                         else:
                             st.caption("ℹ️ Meta CSV: 선택 기간 내 데이터 없음")
+                        # 전월 비교 기간 — prev_raw_df에 Meta 전월 데이터 추가
+                        mask_meta_prev = (
+                            (_m_filtered['날짜'] >= pd.Timestamp(prev_start)) &
+                            (_m_filtered['날짜'] <= pd.Timestamp(prev_end))
+                        )
+                        meta_prev = _m_filtered[mask_meta_prev]
+                        if not meta_prev.empty:
+                            if prev_raw_df is None:
+                                prev_raw_df = meta_prev.copy()
+                            else:
+                                prev_raw_df = pd.concat([prev_raw_df, meta_prev], ignore_index=True)
+                                prev_raw_df = prev_raw_df.sort_values(['날짜', '매체']).reset_index(drop=True)
+                            st.caption(f"✅ Meta 전월 데이터 {len(meta_prev)}일치 포함 ({prev_start} ~ {prev_end})")
+                        else:
+                            st.caption(f"ℹ️ Meta CSV: 비교 기간 내 데이터 없음 ({prev_start} ~ {prev_end})")
                     except Exception as e:
                         st.warning(f"⚠️ Meta CSV 로드 실패: {e}")
 
                 # ── Instagram 유기 CSV 처리 ───────────────
-                ig_account_df = None   # 게시물 데이터에서 자동 계산됨
-                ig_media_df   = None
+                ig_account_df    = None   # 게시물 데이터에서 자동 계산됨
+                ig_media_df      = None
+                prev_ig_media_df = None
 
                 if ig_media_file:
                     try:
                         ig_media_file.seek(0)
-                        ig_media_df = pd.read_csv(ig_media_file, encoding='utf-8-sig')
-                        ig_media_df['날짜'] = pd.to_datetime(ig_media_df['날짜'])
-                        st.caption(f"✅ Instagram 게시물 성과 {len(ig_media_df)}개 포함")
+                        _ig_all = pd.read_csv(ig_media_file, encoding='utf-8-sig')
+                        _ig_all['날짜'] = pd.to_datetime(_ig_all['날짜'])
+                        # 이번 기간 필터
+                        mask_ig_curr = (
+                            (_ig_all['날짜'] >= pd.Timestamp(report_start)) &
+                            (_ig_all['날짜'] <= pd.Timestamp(report_end))
+                        )
+                        ig_media_df = _ig_all[mask_ig_curr].copy()
+                        # 전월 비교 기간 필터
+                        mask_ig_prev = (
+                            (_ig_all['날짜'] >= pd.Timestamp(prev_start)) &
+                            (_ig_all['날짜'] <= pd.Timestamp(prev_end))
+                        )
+                        prev_ig_media_df = _ig_all[mask_ig_prev].copy()
+                        if prev_ig_media_df.empty:
+                            prev_ig_media_df = None
+                        st.caption(
+                            f"✅ Instagram 게시물: 이번달 {len(ig_media_df)}개 "
+                            f"/ 전월 {len(prev_ig_media_df) if prev_ig_media_df is not None else 0}개"
+                        )
                     except Exception as e:
                         st.warning(f"⚠️ Instagram 게시물 성과 로드 실패: {e}")
 
@@ -459,6 +493,7 @@ if generate:
                     prev_raw_df=prev_raw_df,
                     ig_account_df=ig_account_df,
                     ig_media_df=ig_media_df,
+                    prev_ig_media_df=prev_ig_media_df,
                     prev_sa_conv_df=prev_sa_conv_df,
                     prev_da_conv_df=prev_da_conv_df,
                 )

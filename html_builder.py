@@ -1273,9 +1273,10 @@ def _ig_insights_html(ig_media_df) -> str:
     )
 
 
-def _build_instagram_section(ig_account_df, ig_media_df) -> str:
+def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) -> str:
     """Instagram 유기 성과 섹션 HTML
     ig_account_df 없어도 ig_media_df 만으로 일별 집계를 자동 도출해 차트 표시.
+    prev_ig_media_df: 전월 비교 기간 게시물 데이터 (MoM 표시용)
     """
     parts = []
 
@@ -1293,6 +1294,36 @@ def _build_instagram_section(ig_account_df, ig_media_df) -> str:
         daily.rename(columns={'index': '날짜'}, inplace=True)
         ig_account_df = daily
 
+    # ── 전월 지표 사전 계산 ─────────────────────────
+    has_prev_ig = prev_ig_media_df is not None and not prev_ig_media_df.empty
+    if has_prev_ig:
+        p_post_count  = len(prev_ig_media_df)
+        p_total_likes = int(prev_ig_media_df['좋아요'].sum()) if '좋아요' in prev_ig_media_df.columns else 0
+        p_total_saved = int(prev_ig_media_df['저장수'].sum()) if '저장수' in prev_ig_media_df.columns else 0
+        # 전월 도달수 합산
+        _p_tmp = prev_ig_media_df.copy()
+        _p_tmp['날짜'] = pd.to_datetime(_p_tmp['날짜']).dt.normalize()
+        _p_agg = {'도달수': 'sum'}
+        p_daily = _p_tmp.groupby('날짜', as_index=False).agg(_p_agg)
+        p_total_reach = p_daily['도달수'].sum() if '도달수' in p_daily.columns else 0
+        _p_posting = p_daily[p_daily['도달수'] > 0] if '도달수' in p_daily.columns else pd.DataFrame()
+        p_avg_reach = _p_posting['도달수'].mean() if not _p_posting.empty else 0
+    else:
+        p_post_count = p_total_likes = p_total_saved = 0
+        p_total_reach = p_avg_reach = 0
+
+    def _ig_mom_badge(curr, prev):
+        """전월 대비 뱃지 HTML"""
+        if not has_prev_ig or prev == 0:
+            return ''
+        try:
+            pct = (float(curr) - float(prev)) / abs(float(prev)) * 100
+            sign, clr = ('▲', '#16A34A') if pct >= 0 else ('▼', '#DC2626')
+            return (f'<div style="font-size:10px;font-weight:600;color:{clr};margin-top:3px">'
+                    f'{sign}{abs(pct):.1f}% <span style="color:#aaa;font-weight:400">전월 대비</span></div>')
+        except Exception:
+            return ''
+
     # ── 계정 인사이트 요약 ──────────────────────────
     if ig_account_df is not None and not ig_account_df.empty:
         total_reach = ig_account_df['도달수'].sum() if '도달수' in ig_account_df.columns else 0
@@ -1307,29 +1338,43 @@ def _build_instagram_section(ig_account_df, ig_media_df) -> str:
         # 팔로워 수: CSV에 컬럼 있으면 사용
         follower_cnt = int(ig_media_df['팔로워수'].iloc[0]) if ig_media_df is not None and '팔로워수' in ig_media_df.columns else None
 
-        def _ig_card(label, value, sub=''):
+        def _ig_card(label, value, sub='', mom_html=''):
             return (f'<div style="background:#FDF2F8;border:1px solid #F0B8D4;'
                     f'border-radius:10px;padding:16px;text-align:center">'
                     f'<div style="font-size:11px;color:{C_IG};font-weight:600;margin-bottom:6px">{label}</div>'
                     f'<div style="font-size:24px;font-weight:700;color:#333">{value}</div>'
-                    f'<div style="font-size:11px;color:#888;margin-top:4px">{sub}</div></div>')
+                    f'<div style="font-size:11px;color:#888;margin-top:4px">{sub}</div>'
+                    f'{mom_html}</div>')
 
         # 팔로워수 → 게시물수 → 총좋아요  /  도달수 → 일평균 → 최고도달일
         row1 = (
             (_ig_card('팔로워 수', _f(follower_cnt), '현재 기준') if follower_cnt is not None
-             else _ig_card('총 저장수', _f(total_saved), '기간 합산')) +
-            _ig_card('게시물 수', f'{post_count}개', '기간 중 업로드') +
-            _ig_card('총 좋아요', _f(total_likes), '기간 합산')
+             else _ig_card('총 저장수', _f(total_saved), '기간 합산',
+                           _ig_mom_badge(total_saved, p_total_saved))) +
+            _ig_card('게시물 수', f'{post_count}개', '기간 중 업로드',
+                     _ig_mom_badge(post_count, p_post_count)) +
+            _ig_card('총 좋아요', _f(total_likes), '기간 합산',
+                     _ig_mom_badge(total_likes, p_total_likes))
         )
         row2 = (
-            _ig_card('기간 총 도달수', _f(total_reach), '게시물 도달 합산') +
-            _ig_card('일 평균 도달수', _f(avg_reach), '게시물 올린 날 기준') +
+            _ig_card('기간 총 도달수', _f(total_reach), '게시물 도달 합산',
+                     _ig_mom_badge(total_reach, p_total_reach)) +
+            _ig_card('일 평균 도달수', _f(avg_reach), '게시물 올린 날 기준',
+                     _ig_mom_badge(avg_reach, p_avg_reach)) +
             _ig_card('최고 도달일',
                      max_day['날짜'].strftime('%m/%d') if max_day is not None else '-',
                      f'{_f(max_day["도달수"])}명 도달' if max_day is not None else '')
         )
 
+        # 전월 대비 헤더 뱃지
+        mom_header = (
+            f'<div style="display:inline-block;background:#F0FDF4;border:1px solid #86EFAC;'
+            f'border-radius:6px;padding:4px 10px;font-size:11px;color:#16A34A;'
+            f'font-weight:600;margin-bottom:10px">📊 전월 대비 비교 표시 중</div>'
+        ) if has_prev_ig else ''
+
         summary_html = (
+            mom_header +
             f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:10px">{row1}</div>'
             f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">{row2}</div>'
         )
@@ -1468,6 +1513,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
                       period_label='', output_path='report.html',
                       sns_tracker_path=None, prev_raw_df=None,
                       ig_account_df=None, ig_media_df=None,
+                      prev_ig_media_df=None,
                       prev_sa_conv_df=None, prev_da_conv_df=None):
 
     sa_cd = _cd(sa_conv_df)
@@ -2152,7 +2198,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
   <div class="tab-panel" id="tab-panel-ig">
 
     {_section('📸 Instagram 유기 성과 (@ktplaza_story)', C_IG,
-        _build_instagram_section(ig_account_df, ig_media_df)
+        _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df)
     )}
 
   </div>
