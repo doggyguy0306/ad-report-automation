@@ -64,7 +64,7 @@ def _cd(conv_df):
 def _svg_line(dates, values, color, title=''):
     """일별 라인 + 수치 표시 SVG"""
     W, H = 740, 310
-    PL, PR, PT, PB = 75, 20, 50, 65
+    PL, PR, PT, PB = 75, 20, (50 if title else 15), 65
     cw, ch = W - PL - PR, H - PT - PB
     n = len(values)
     if n == 0:
@@ -118,9 +118,11 @@ def _svg_line(dates, values, color, title=''):
     axes = (f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>'
             f'<line x1="{PL}" y1="{PT+ch}" x2="{PL+cw}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>')
 
+    title_el = (f'<text x="{W/2}" y="30" text-anchor="middle" font-size="14" '
+                f'font-weight="bold" fill="{C_NAVY}">{title}</text>') if title else ''
     return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
             f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
-            f'<text x="{W/2}" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="{C_NAVY}">{title}</text>'
+            f'{title_el}'
             f'{grid}{axes}'
             f'<polygon points="{area_pts}" fill="{color}" opacity="0.10"/>'
             f'<polyline points="{line_pts}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linejoin="round"/>'
@@ -130,7 +132,7 @@ def _svg_line(dates, values, color, title=''):
 def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''):
     """도달수 + 조회수 2개 라인 SVG 차트 (전체 날짜 + 호버 툴팁)"""
     W, H = 780, 360
-    PL, PR, PT, PB = 52, 12, 55, 88
+    PL, PR, PT, PB = 52, 12, (55 if title else 20), 88
     cw, ch = W - PL - PR, H - PT - PB
     n = len(vals1)
     if n == 0:
@@ -202,8 +204,8 @@ def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''
         f'<circle cx="{lx+80}" cy="22" r="5" fill="{color2}"/>'
         f'<text x="{lx+89}" y="26" font-size="11" font-weight="600" fill="{color2}">{label2}</text>'
     )
-    title_svg = (f'<text x="{W/2}" y="32" text-anchor="middle" font-size="14" '
-                 f'font-weight="bold" fill="{C_NAVY}">{title}</text>')
+    title_svg = ((f'<text x="{W/2}" y="32" text-anchor="middle" font-size="14" '
+                  f'font-weight="bold" fill="{C_NAVY}">{title}</text>') if title else '')
 
     return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
             f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
@@ -218,7 +220,7 @@ def _svg_bar_grouped(group_labels, datasets, title=''):
     datasets: [(name, [values], color), ...]
     """
     W, H = 740, 310
-    PL, PR, PT, PB = 75, 20, 50, 55
+    PL, PR, PT, PB = 75, 20, (50 if title else 15), 55
     cw, ch = W - PL - PR, H - PT - PB
     n, nd = len(group_labels), len(datasets)
     if n == 0 or nd == 0:
@@ -269,9 +271,11 @@ def _svg_bar_grouped(group_labels, datasets, title=''):
     axes = (f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>'
             f'<line x1="{PL}" y1="{PT+ch}" x2="{PL+cw}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>')
 
+    title_el = (f'<text x="{W/2}" y="30" text-anchor="middle" font-size="14" '
+                f'font-weight="bold" fill="{C_NAVY}">{title}</text>') if title else ''
     return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
             f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
-            f'<text x="{W/2}" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="{C_NAVY}">{title}</text>'
+            f'{title_el}'
             f'{grid}{axes}{bars}{legend}</svg>')
 
 
@@ -306,9 +310,11 @@ def _svg_pie(labels, values, colors, title=''):
                 f'<text x="{W*0.80+16:.1f}" y="{ly_l+10}" font-size="11" fill="{C_TEXT}">{lbl[:10]}</text>')
         angle = a2
 
+    title_el = (f'<text x="{cx}" y="28" text-anchor="middle" font-size="14" '
+                f'font-weight="bold" fill="{C_NAVY}">{title}</text>') if title else ''
     return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
             f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
-            f'<text x="{cx}" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="{C_NAVY}">{title}</text>'
+            f'{title_el}'
             f'{slices}{leg}</svg>')
 
 
@@ -1333,7 +1339,7 @@ def _build_instagram_section(ig_account_df, ig_media_df) -> str:
         dates   = [str(d)[:10] for d in ig_account_df['날짜'].tolist()]
         reach_v = ig_account_df['도달수'].tolist()
         views_v = ig_account_df['조회수'].tolist() if '조회수' in ig_account_df.columns else [0]*len(reach_v)
-        chart   = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수', '일별 도달수 · 조회수')
+        chart   = _svg_dual_line(dates, reach_v, C_IG, '도달수', views_v, '#F4B400', '조회수')
         parts.append(f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;margin-bottom:16px">'
                      f'<div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:8px">📈 일별 도달수 · 조회수 추이</div>'
                      f'{chart}</div>')
@@ -1720,11 +1726,9 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     svg_cmp_click = _svg_bar_grouped(
         media_labels,
         [('클릭수', click_vals, C_GOOGLE)],
-        title='매체별 클릭수 비교'
     )
     svg_cost_pie = _svg_pie(
         media_labels, cost_vals, media_colors,
-        title='매체별 비용 비중'
     )
 
     compare_content = (
@@ -1750,8 +1754,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         clicks = [float(v) for v in daily['클릭']]
         costs  = [float(v) for v in daily['비용']]
 
-        svg_c_d = _svg_line(dates, clicks, color, title='일별 클릭수 추이')
-        svg_v_d = _svg_line(dates, costs,  color, title='일별 비용 추이')
+        svg_c_d = _svg_line(dates, clicks, color)
+        svg_v_d = _svg_line(dates, costs,  color)
 
         # 일별 테이블 (data-date 속성 포함 → JS 기간 필터용)
         daily_rows_html = ''
@@ -1788,8 +1792,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         w_clicks = [float(v) for v in weekly['클릭']]
         w_costs  = [float(v) for v in weekly['비용']]
 
-        svg_c_w = _svg_line(w_dates, w_clicks, color, title='주별 클릭수 추이')
-        svg_v_w = _svg_line(w_dates, w_costs,  color, title='주별 비용 추이')
+        svg_c_w = _svg_line(w_dates, w_clicks, color)
+        svg_v_w = _svg_line(w_dates, w_costs,  color)
 
         weekly_rows_html = ''
         for i, r in weekly.iterrows():
@@ -1904,14 +1908,12 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             btn_labels,
             [('SA 이번달', sa_vals, C_GOOGLE), ('SA 전월', p_sa_vals, '#A8C4F5'),
              ('DA 이번달', da_vals, C_DA),     ('DA 전월', p_da_vals, '#F2A9A2')],
-            title='SA · DA 버튼 전환 — 이번달 vs 전월'
         )
         conv_chart_title = 'SA · DA 버튼 전환 — 이번달 vs 전월'
     else:
         svg_conv_bar = _svg_bar_grouped(
             btn_labels,
             [('Google SA', sa_vals, C_GOOGLE), ('Google DA', da_vals, C_DA)],
-            title='SA vs DA 버튼별 전환 비교'
         )
         conv_chart_title = 'SA vs DA 버튼별 전환 비교'
 
