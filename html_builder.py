@@ -256,27 +256,39 @@ def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''
 
 
 def _svg_bar_grouped(group_labels, datasets, title=''):
-    """grouped bar chart SVG
+    """grouped bar chart SVG (폰트 확대 + CSS hover 툴팁 효과)
     datasets: [(name, [values], color), ...]
     """
-    W, H = 740, 310
-    PL, PR, PT, PB = 75, 20, (50 if title else 15), 55
+    W, H = 740, 340
+    PL, PR, PT, PB = 84, 20, (58 if title else 22), 72
     cw, ch = W - PL - PR, H - PT - PB
     n, nd = len(group_labels), len(datasets)
     if n == 0 or nd == 0:
         return ''
 
     all_vals = [v for _, vals, _ in datasets for v in vals]
-    max_v = max(all_vals) * 1.1 if all_vals and max(all_vals) > 0 else 1
+    max_v = max(all_vals) * 1.15 if all_vals and max(all_vals) > 0 else 1
 
+    # CSS hover 효과 (SVG 내 <defs><style>)
+    css = (
+        '<defs><style>'
+        '.bar-grp { cursor: pointer; }'
+        '.bar-grp .bar-rect { transition: opacity 0.15s ease, filter 0.15s ease; }'
+        '.bar-grp:hover .bar-rect { opacity: 0.72; filter: brightness(1.08); }'
+        '.bar-grp .bar-tip { display: none; pointer-events: none; }'
+        '.bar-grp:hover .bar-tip { display: block; }'
+        '</style></defs>'
+    )
+
+    # 격자선 + Y레이블 (font-size 12)
     grid = ''
     for k in range(5):
         gv = max_v * k / 4
         gy = PT + ch - (gv / max_v) * ch
         grid += (f'<line x1="{PL}" y1="{gy:.1f}" x2="{PL+cw}" y2="{gy:.1f}" '
                  f'stroke="#EEEEEE" stroke-width="1"/>'
-                 f'<text x="{PL-6}" y="{gy+4:.1f}" text-anchor="end" '
-                 f'font-size="10" fill="{C_MUTED}">{_f(gv)}</text>')
+                 f'<text x="{PL-8}" y="{gy+5:.1f}" text-anchor="end" '
+                 f'font-size="12" fill="{C_MUTED}">{_f(gv)}</text>')
 
     group_w = cw / n
     bar_w   = group_w * 0.7 / nd
@@ -285,38 +297,59 @@ def _svg_bar_grouped(group_labels, datasets, title=''):
 
     for gi, g_lbl in enumerate(group_labels):
         gx = PL + gi * group_w + pad
-        for di, (_, vals, color) in enumerate(datasets):
-            v  = vals[gi] if gi < len(vals) else 0
+        for di, (ds_name, vals, color) in enumerate(datasets):
+            v  = float(vals[gi]) if gi < len(vals) else 0
             bh = (v / max_v) * ch if max_v > 0 else 0
             bx = gx + di * bar_w
             by = PT + ch - bh
-            bars += (f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" '
-                     f'height="{bh:.1f}" fill="{color}" rx="3"/>'
-                     f'<text x="{bx + bar_w/2:.1f}" y="{max(PT+5, by-4):.1f}" '
-                     f'text-anchor="middle" font-size="9" font-weight="bold" fill="{color}">{_f(v)}</text>')
-        # X label
-        lx = PL + gi * group_w + group_w / 2
-        bars += (f'<text x="{lx:.1f}" y="{PT+ch+18}" text-anchor="middle" '
-                 f'font-size="11" fill="{C_TEXT}">{g_lbl}</text>')
 
-    # 범례
+            # 툴팁 치수 계산
+            tip_txt  = f'{ds_name}: {_f(v)}'
+            tip_w    = len(tip_txt) * 7.5 + 18
+            tip_x    = bx + bar_w / 2 - tip_w / 2
+            tip_y    = max(PT + 6, by - 38)
+
+            bars += (
+                f'<g class="bar-grp">'
+                # 막대
+                f'<rect class="bar-rect" x="{bx:.1f}" y="{by:.1f}" '
+                f'width="{bar_w:.1f}" height="{max(bh, 0.5):.1f}" fill="{color}" rx="3"/>'
+                # 값 레이블 (font-size 12, bold)
+                f'<text class="bar-val" x="{bx + bar_w/2:.1f}" y="{max(PT+16, by-5):.1f}" '
+                f'text-anchor="middle" font-size="12" font-weight="bold" fill="{color}">{_f(v)}</text>'
+                # 호버 툴팁 (CSS display:none → block)
+                f'<g class="bar-tip">'
+                f'  <rect x="{tip_x:.1f}" y="{tip_y:.1f}" width="{tip_w:.1f}" height="23" '
+                f'    fill="#1C1C1E" rx="5" opacity="0.90"/>'
+                f'  <text x="{bx + bar_w/2:.1f}" y="{tip_y + 16:.1f}" '
+                f'    text-anchor="middle" font-size="12" font-weight="600" fill="white">{tip_txt}</text>'
+                f'</g>'
+                f'</g>'
+            )
+        # X축 그룹 레이블 (font-size 13, bold)
+        lx_lbl = PL + gi * group_w + group_w / 2
+        bars += (f'<text x="{lx_lbl:.1f}" y="{PT+ch+22}" text-anchor="middle" '
+                 f'font-size="13" font-weight="600" fill="{C_TEXT}">{g_lbl}</text>')
+
+    # 범례 (font-size 13)
     legend = ''
-    total_leg_w = nd * 110
+    leg_item_w = 120
+    total_leg_w = nd * leg_item_w
     lx0 = (W - total_leg_w) / 2
     for di, (name, _, color) in enumerate(datasets):
-        lx = lx0 + di * 110
-        legend += (f'<rect x="{lx:.1f}" y="{H-20}" width="12" height="12" fill="{color}" rx="2"/>'
-                   f'<text x="{lx+16:.1f}" y="{H-10}" font-size="11" fill="{C_TEXT}">{name}</text>')
+        lx = lx0 + di * leg_item_w
+        legend += (f'<rect x="{lx:.1f}" y="{H-24}" width="14" height="14" fill="{color}" rx="3"/>'
+                   f'<text x="{lx+20:.1f}" y="{H-13}" font-size="13" font-weight="500" fill="{C_TEXT}">{name}</text>')
 
     axes = (f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>'
             f'<line x1="{PL}" y1="{PT+ch}" x2="{PL+cw}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>')
 
-    title_el = (f'<text x="{W/2}" y="30" text-anchor="middle" font-size="14" '
+    title_el = (f'<text x="{W/2}" y="36" text-anchor="middle" font-size="15" '
                 f'font-weight="bold" fill="{C_NAVY}">{title}</text>') if title else ''
+
     return (f'<svg viewBox="0 0 {W} {H}" width="100%" xmlns="http://www.w3.org/2000/svg">'
             f'<rect width="{W}" height="{H}" fill="white" rx="6"/>'
-            f'{title_el}'
-            f'{grid}{axes}{bars}{legend}</svg>')
+            f'{css}{title_el}{grid}{axes}{bars}{legend}</svg>')
 
 
 def _svg_pie(labels, values, colors, title=''):
