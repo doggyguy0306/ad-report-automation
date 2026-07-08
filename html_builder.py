@@ -1431,6 +1431,10 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
         # 팔로워 수: CSV에 컬럼 있으면 사용
         follower_cnt = int(ig_media_df['팔로워수'].iloc[0]) if ig_media_df is not None and '팔로워수' in ig_media_df.columns else None
 
+        # 일 평균 계산용 달력 일수
+        _ig_cal_days = max(1, len(ig_account_df))
+        _p_ig_cal_days = max(1, len(prev_ig_account_df)) if has_prev_ig and prev_ig_account_df is not None and not prev_ig_account_df.empty else 30
+
         def _ig_info_card(label, value, sub=''):
             return (f'<div style="background:#FDF2F8;border:1px solid #F0B8D4;'
                     f'border-radius:10px;padding:16px;text-align:center;flex:1">'
@@ -1497,14 +1501,62 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
                         f'<div style="font-size:11px;color:#888;margin-top:4px">{sub}</div>'
                         f'</div>')
             metric_cards = (
-                _ig_metric_card('게시물 수', f'{post_count}개', '기간 중 업로드') +
-                _ig_metric_card('총 좋아요', _f(total_likes), '기간 합산') +
-                _ig_metric_card('총 도달수', _f(total_reach), '게시물 도달 합산') +
-                _ig_metric_card('일평균 도달수', _f(avg_reach), '게시물 올린 날 기준')
+                _ig_metric_card('게시물 수', f'{post_count}개',
+                                f'일 평균 {post_count / _ig_cal_days:.1f}개') +
+                _ig_metric_card('총 좋아요', _f(total_likes),
+                                f'일 평균 {total_likes / _ig_cal_days:.1f}') +
+                _ig_metric_card('총 도달수', _f(total_reach),
+                                f'일 평균 {_f(round(avg_reach))} (게시일 기준)') +
+                _ig_metric_card('총 저장수', _f(total_saved),
+                                f'일 평균 {total_saved / _ig_cal_days:.1f}')
             )
             parts.append(
                 f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px">'
                 f'{metric_cards}</div>'
+            )
+
+        # [B2] 합계 + 일 평균 요약 카드 (전월 비교 포함 시에만)
+        if has_prev_ig:
+            def _ig_stat_row(label, curr_tot, prev_tot, curr_days, prev_days, fmt='n'):
+                """합계 | 일 평균 | 전월 MoM 한 줄"""
+                def _fv(v): return _f(round(v)) if fmt == 'n' else f'{v:.1f}'
+                c_avg = curr_tot / curr_days
+                p_avg = prev_tot / prev_days
+                mom_pct = (curr_tot - prev_tot) / abs(prev_tot) * 100 if prev_tot else 0
+                sign, clr = ('▲', '#16A34A') if mom_pct >= 0 else ('▼', '#DC2626')
+                return (
+                    f'<tr style="border-bottom:1px solid #fce7f3">'
+                    f'<td style="padding:7px 10px;font-size:12px;font-weight:600;color:{C_IG}">{label}</td>'
+                    f'<td style="padding:7px 10px;font-size:12px;text-align:right">{_fv(curr_tot)}</td>'
+                    f'<td style="padding:7px 10px;font-size:11px;text-align:right;color:#888">{_fv(c_avg)} / 일</td>'
+                    f'<td style="padding:7px 10px;font-size:12px;text-align:right;color:#aaa">{_fv(prev_tot)}</td>'
+                    f'<td style="padding:7px 10px;font-size:11px;text-align:right;color:#bbb">{_fv(p_avg)} / 일</td>'
+                    f'<td style="padding:7px 10px;font-size:11px;text-align:right;font-weight:700;color:{clr}">{sign}{abs(mom_pct):.1f}%</td>'
+                    f'</tr>'
+                )
+            _stat_rows = (
+                _ig_stat_row('게시물 수', post_count, p_post_count, _ig_cal_days, _p_ig_cal_days, 'f') +
+                _ig_stat_row('좋아요', total_likes, p_total_likes, _ig_cal_days, _p_ig_cal_days) +
+                _ig_stat_row('저장수', total_saved, p_total_saved, _ig_cal_days, _p_ig_cal_days)
+            )
+            if total_views > 0 or p_total_views > 0:
+                _stat_rows += _ig_stat_row('조회수', total_views, p_total_views, _ig_cal_days, _p_ig_cal_days)
+            _stat_rows += _ig_stat_row('도달수', total_reach, p_total_reach, _ig_cal_days, _p_ig_cal_days)
+            parts.append(
+                f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:14px;margin-bottom:16px">'
+                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:10px">📊 합계 · 일 평균 비교</div>'
+                f'<table style="width:100%;border-collapse:collapse">'
+                f'<thead><tr style="background:#fdf2f8">'
+                f'<th style="padding:6px 10px;font-size:11px;text-align:left;color:#888">지표</th>'
+                f'<th style="padding:6px 10px;font-size:11px;text-align:right;color:{C_IG}">{curr_label} 합계</th>'
+                f'<th style="padding:6px 10px;font-size:11px;text-align:right;color:{C_IG}">일 평균</th>'
+                f'<th style="padding:6px 10px;font-size:11px;text-align:right;color:#aaa">{prev_label} 합계</th>'
+                f'<th style="padding:6px 10px;font-size:11px;text-align:right;color:#aaa">일 평균</th>'
+                f'<th style="padding:6px 10px;font-size:11px;text-align:right;color:#888">증감</th>'
+                f'</tr></thead>'
+                f'<tbody>{_stat_rows}</tbody>'
+                f'</table>'
+                f'</div>'
             )
 
         # [C] 일별 도달수 추이 라인 차트 (이번달만, 전월 파선 없음)
@@ -1670,6 +1722,9 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     p_da_cd = _cd(prev_da_conv_df) if (prev_da_conv_df is not None and not prev_da_conv_df.empty) else {}
     today = datetime.now().strftime('%Y-%m-%d %H:%M')
 
+    # ── 기간 일수 계산 (일 평균 산출용) ─────────
+    _n_days = max(1, int(raw_df['날짜'].nunique())) if not raw_df.empty else 30
+
     # ── 전체 집계 ──────────────────────────
     total_노출 = raw_df['노출'].sum()
     total_클릭 = raw_df['클릭'].sum()
@@ -1813,7 +1868,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     _bar = lambda pv, cv, fmt: (pv, cv, fmt) if has_prev else None
     kpi_html = (
         _kpi_card_expandable(
-            label='전체 노출', value=_f(total_노출), sub='기간 합계',
+            label='전체 노출', value=_f(total_노출),
+            sub=f'기간 합계  ·  일 평균 {_f(round(total_노출 / _n_days))}',
             color=C_NAVY, mom=_mom(total_노출, p_노출),
             card_id='kpi-노출',
             bar_data=_bar(p_노출, total_노출, 'n'),
@@ -1825,7 +1881,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             prev_label=_prev_mon
         ) +
         _kpi_card_expandable(
-            label='전체 클릭', value=_f(total_클릭), sub=f'전체 비중 100%',
+            label='전체 클릭', value=_f(total_클릭),
+            sub=f'기간 합계  ·  일 평균 {_f(round(total_클릭 / _n_days))}',
             color=C_GOOGLE, mom=_mom(total_클릭, p_클릭),
             card_id='kpi-클릭',
             bar_data=_bar(p_클릭, total_클릭, 'n'),
@@ -1838,7 +1895,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         ) +
         _kpi_card_expandable(
             label='전체 광고비', value=f'₩{_f(total_비용)}',
-            sub='기간 합계',
+            sub=f'기간 합계  ·  일 평균 ₩{_f(round(total_비용 / _n_days))}',
             color=C_DA, mom=_mom(total_비용, p_비용),
             card_id='kpi-비용',
             bar_data=_bar(p_비용, total_비용, 'won'),
@@ -1877,7 +1934,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         ) +
         _kpi_card_expandable(
             label='버튼 전환율', value=f'{total_전환율:.2f}%',
-            sub=f'총 {_f(total_버튼전환)}건 전환',
+            sub=f'총 {_f(total_버튼전환)}건  ·  일 평균 {total_버튼전환 / _n_days:.1f}건',
             color='#7C3AED', mom=_mom(total_전환율, p_total_전환율),
             card_id='kpi-conv',
             bar_data=_bar(p_total_전환율, total_전환율, 'pct'),
