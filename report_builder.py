@@ -911,7 +911,7 @@ def build_raw(ws, raw_df):
 # 메인 빌더
 # ────────────────────────────────────────
 def build_report(raw_df, naver_kw_df=None, google_sa_kw_df=None,
-                 google_da_kw_df=None, sa_conv_df=None, da_conv_df=None,
+                 sa_conv_df=None,
                  search_terms_df=None, period_label='', output_path='report.xlsx',
                  sns_tracker_path=None):
     """광고 성과 Excel 장표 생성.
@@ -920,6 +920,8 @@ def build_report(raw_df, naver_kw_df=None, google_sa_kw_df=None,
       - 첫 번째 시트로 '📋 종합 장표' 가 추가됩니다 (광고 KPI + SNS 최신 현황)
       - SNS 채널 시트 5개가 스냅샷으로 마지막에 추가됩니다
     """
+
+    da_conv_df = None  # DA 광고 중단
 
     # ── SNS 데이터 읽기 (선택) ──────────────
     sns_rows = None
@@ -936,7 +938,6 @@ def build_report(raw_df, naver_kw_df=None, google_sa_kw_df=None,
     ws_cmp  = wb.create_sheet('네이버_vs_구글')
     ws_nav  = wb.create_sheet('Naver_SA')
     ws_gsa  = wb.create_sheet('Google_SA')
-    ws_gda  = wb.create_sheet('Google_DA')
     ws_conv = wb.create_sheet('전환_상세')
     ws_nkw  = wb.create_sheet('Naver_키워드')
     ws_gkw  = wb.create_sheet('Google_키워드')
@@ -949,10 +950,8 @@ def build_report(raw_df, naver_kw_df=None, google_sa_kw_df=None,
     build_comparison(ws_cmp, raw_df, sa_conv_df, da_conv_df)
     build_media_sheet(ws_nav, raw_df, 'Naver',     'Naver_SA',  C_NAVER,  None)
     build_media_sheet(ws_gsa, raw_df, 'Google_SA', 'Google_SA', C_GOOGLE, sa_conv_df)
-    build_media_sheet(ws_gda, raw_df, 'Google_DA', 'Google_DA', C_DA,     da_conv_df)
 
-    if (sa_conv_df is not None and not sa_conv_df.empty) or \
-       (da_conv_df is not None and not da_conv_df.empty):
+    if sa_conv_df is not None and not sa_conv_df.empty:
         build_conversion_sheet(ws_conv, sa_conv_df, da_conv_df, raw_df)
     else:
         ws_conv['A1'] = '전환 데이터 없음'
@@ -962,9 +961,8 @@ def build_report(raw_df, naver_kw_df=None, google_sa_kw_df=None,
     else:
         ws_nkw['A1'] = '네이버 키워드 데이터 없음'
 
-    g_kws = [d for d in [google_sa_kw_df, google_da_kw_df] if d is not None and not d.empty]
-    if g_kws:
-        build_keyword_sheet(ws_gkw, pd.concat(g_kws, ignore_index=True), 'Google_키워드 상세', C_GOOGLE)
+    if google_sa_kw_df is not None and not google_sa_kw_df.empty:
+        build_keyword_sheet(ws_gkw, google_sa_kw_df, 'Google_키워드 상세', C_GOOGLE)
     else:
         ws_gkw['A1'] = '구글 키워드 데이터 없음'
 

@@ -1748,18 +1748,20 @@ def _build_sns_section(sns_path: str) -> str:
 # 메인 빌더
 # ════════════════════════════════════════════
 
-def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
+def build_html_report(raw_df, sa_conv_df=None,
                       period_label='', output_path='report.html',
                       sns_tracker_path=None, prev_raw_df=None,
                       ig_account_df=None, ig_media_df=None,
                       prev_ig_media_df=None,
-                      prev_sa_conv_df=None, prev_da_conv_df=None):
+                      prev_sa_conv_df=None,
+                      # 하위호환 — DA 파라미터는 무시
+                      da_conv_df=None, prev_da_conv_df=None):
 
     sa_cd = _cd(sa_conv_df)
-    da_cd = _cd(da_conv_df)
+    da_cd = {}  # DA 광고 중단 — 항상 빈 딕셔너리
     # 전월 전환 상세 딕셔너리 (버튼별 MoM 비교용)
     p_sa_cd = _cd(prev_sa_conv_df) if (prev_sa_conv_df is not None and not prev_sa_conv_df.empty) else {}
-    p_da_cd = _cd(prev_da_conv_df) if (prev_da_conv_df is not None and not prev_da_conv_df.empty) else {}
+    p_da_cd = {}  # DA 광고 중단
     today = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     # ── 기간 일수 계산 (일 평균 산출용) ─────────
@@ -1777,31 +1779,31 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
 
     naver_df  = raw_df[raw_df['매체'].str.startswith('Naver')]
     gsa_df    = raw_df[raw_df['매체'] == 'Google_SA']
-    gda_df    = raw_df[raw_df['매체'] == 'Google_DA']
+    gda_df    = raw_df[raw_df['매체'] == 'Google_DA']   # DA 중단 — 빈 df가 될 것
     google_df = raw_df[raw_df['매체'].str.startswith('Google')]
     meta_df   = raw_df[raw_df['매체'] == 'Meta']
     has_meta  = not meta_df.empty
 
     naver_클릭  = naver_df['클릭'].sum()
     gsa_클릭    = gsa_df['클릭'].sum()
-    gda_클릭    = gda_df['클릭'].sum()
-    google_클릭 = google_df['클릭'].sum()
+    gda_클릭    = 0  # DA 광고 중단
+    google_클릭 = gsa_클릭  # SA만
     meta_클릭   = meta_df['클릭'].sum() if has_meta else 0
 
     # 네이버: 별도 전환파일 없음 → raw 데이터 '총 전환수' 사용
     naver_버튼전환 = naver_df['전환'].sum()
     sa_버튼전환    = sum(sa_cd.values()) - sa_cd.get('페이지조회', 0)
-    da_버튼전환    = sum(da_cd.values()) - da_cd.get('페이지조회', 0)
+    da_버튼전환    = 0  # DA 광고 중단
     meta_버튼전환  = meta_df['전환'].sum() if has_meta else 0
 
     # ── 매체별 집계 ───────────────────────
     naver_노출 = naver_df['노출'].sum()
     gsa_노출   = gsa_df['노출'].sum()
-    gda_노출   = gda_df['노출'].sum()
+    gda_노출   = 0  # DA 광고 중단
     meta_노출  = meta_df['노출'].sum() if has_meta else 0
     naver_비용 = naver_df['비용'].sum()
     gsa_비용   = gsa_df['비용'].sum()
-    gda_비용   = gda_df['비용'].sum()
+    gda_비용   = 0  # DA 광고 중단
     meta_비용  = meta_df['비용'].sum() if has_meta else 0
 
     # ── 전월 동기간 집계 ───────────────────
@@ -1813,23 +1815,27 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     if has_prev:
         p_naver_df = prev_raw_df[prev_raw_df['매체'].str.startswith('Naver')]
         p_gsa_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_SA']
-        p_gda_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_DA']
+        p_gda_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_DA']  # 전월에 DA 있었더라도 집계
         p_meta_df  = prev_raw_df[prev_raw_df['매체'] == 'Meta']
-        p_노출       = prev_raw_df['노출'].sum()
-        p_클릭       = prev_raw_df['클릭'].sum()
-        p_비용       = prev_raw_df['비용'].sum()
+        # 전월 총계에서 DA 제외 (SA+네이버 기준 비교)
+        p_노출 = (p_naver_df['노출'].sum() + p_gsa_df['노출'].sum() +
+                  (p_meta_df['노출'].sum() if not p_meta_df.empty else 0))
+        p_클릭 = (p_naver_df['클릭'].sum() + p_gsa_df['클릭'].sum() +
+                  (p_meta_df['클릭'].sum() if not p_meta_df.empty else 0))
+        p_비용 = (p_naver_df['비용'].sum() + p_gsa_df['비용'].sum() +
+                  (p_meta_df['비용'].sum() if not p_meta_df.empty else 0))
         p_naver_노출 = p_naver_df['노출'].sum()
         p_gsa_노출   = p_gsa_df['노출'].sum()
-        p_gda_노출   = p_gda_df['노출'].sum()
-        p_meta_노출  = p_meta_df['노출'].sum()
+        p_gda_노출   = 0  # DA 제외
+        p_meta_노출  = p_meta_df['노출'].sum() if not p_meta_df.empty else 0
         p_naver_클릭 = p_naver_df['클릭'].sum()
         p_gsa_클릭   = p_gsa_df['클릭'].sum()
-        p_gda_클릭   = p_gda_df['클릭'].sum()
-        p_meta_클릭  = p_meta_df['클릭'].sum()
+        p_gda_클릭   = 0  # DA 제외
+        p_meta_클릭  = p_meta_df['클릭'].sum() if not p_meta_df.empty else 0
         p_naver_비용 = p_naver_df['비용'].sum()
         p_gsa_비용   = p_gsa_df['비용'].sum()
-        p_gda_비용   = p_gda_df['비용'].sum()
-        p_meta_비용  = p_meta_df['비용'].sum()
+        p_gda_비용   = 0  # DA 제외
+        p_meta_비용  = p_meta_df['비용'].sum() if not p_meta_df.empty else 0
 
     # 기간 월 레이블 자동 도출
     def _month_label(df):
@@ -1849,10 +1855,10 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
     total_CPC = _safe_div(total_비용, total_클릭)
     naver_CTR = _safe_div(naver_클릭, naver_노출) * 100
     gsa_CTR   = _safe_div(gsa_클릭,   gsa_노출)   * 100
-    gda_CTR   = _safe_div(gda_클릭,   gda_노출)   * 100
+    gda_CTR   = 0.0  # DA 광고 중단
     naver_CPC = _safe_div(naver_비용, naver_클릭)
     gsa_CPC   = _safe_div(gsa_비용,   gsa_클릭)
-    gda_CPC   = _safe_div(gda_비용,   gda_클릭)
+    gda_CPC   = 0.0  # DA 광고 중단
     meta_CTR  = _safe_div(meta_클릭,  meta_노출) * 100 if has_meta else 0.0
     meta_CPC  = _safe_div(meta_비용,  meta_클릭)       if has_meta else 0.0
     meta_전환율 = _safe_div(meta_버튼전환, meta_클릭) * 100 if has_meta else 0.0
@@ -1864,23 +1870,22 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         p_total_CTR = _safe_div(p_클릭,       p_노출)       * 100
         p_naver_CTR = _safe_div(p_naver_클릭,  p_naver_노출) * 100
         p_gsa_CTR   = _safe_div(p_gsa_클릭,    p_gsa_노출)   * 100
-        p_gda_CTR   = _safe_div(p_gda_클릭,    p_gda_노출)   * 100
+        p_gda_CTR   = 0.0  # DA 제외
         p_meta_CTR  = _safe_div(p_meta_클릭,   p_meta_노출)  * 100
         p_total_CPC = _safe_div(p_비용,        p_클릭)
         p_naver_CPC = _safe_div(p_naver_비용,  p_naver_클릭)
         p_gsa_CPC   = _safe_div(p_gsa_비용,    p_gsa_클릭)
-        p_gda_CPC   = _safe_div(p_gda_비용,    p_gda_클릭)
+        p_gda_CPC   = 0.0  # DA 제외
         p_meta_CPC  = _safe_div(p_meta_비용,   p_meta_클릭)
 
-    # 버튼 전환율 계산
-    total_버튼전환 = naver_버튼전환 + sa_버튼전환 + da_버튼전환
+    # 버튼 전환율 계산 (DA 제외)
+    total_버튼전환 = naver_버튼전환 + sa_버튼전환
     total_전환율   = _safe_div(total_버튼전환, total_클릭) * 100
     naver_전환율   = _safe_div(naver_버튼전환, naver_클릭) * 100
     gsa_전환율     = _safe_div(sa_버튼전환,    gsa_클릭)   * 100
-    gda_전환율     = _safe_div(da_버튼전환,    gda_클릭)   * 100
+    gda_전환율     = 0.0  # DA 광고 중단
 
     # 전월 버튼 전환율
-    # 전환 CSV가 있으면 _cd()로 페이지조회 제외, 없으면 raw_df '전환' 합계 사용
     p_total_전환율 = p_naver_전환율 = p_gsa_전환율 = p_gda_전환율 = p_meta_전환율 = 0.0
     p_meta_버튼전환 = 0
     if has_prev:
@@ -1891,18 +1896,13 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             p_gsa_버튼전환 = sum(p_sa_cd.values()) - p_sa_cd.get('페이지조회', 0)
         else:
             p_gsa_버튼전환 = p_gsa_df['전환'].sum()
-        # DA: 전월 전환 CSV 있으면 정확한 버튼 전환만, 없으면 raw 합계
-        if prev_da_conv_df is not None and not prev_da_conv_df.empty:
-            p_da_cd = _cd(prev_da_conv_df)
-            p_gda_버튼전환 = sum(p_da_cd.values()) - p_da_cd.get('페이지조회', 0)
-        else:
-            p_gda_버튼전환 = p_gda_df['전환'].sum()
-        p_meta_버튼전환  = p_meta_df['전환'].sum()
-        p_total_버튼전환 = p_naver_버튼전환 + p_gsa_버튼전환 + p_gda_버튼전환
+        p_gda_버튼전환 = 0  # DA 제외
+        p_meta_버튼전환  = p_meta_df['전환'].sum() if not p_meta_df.empty else 0
+        p_total_버튼전환 = p_naver_버튼전환 + p_gsa_버튼전환
         p_total_전환율   = _safe_div(p_total_버튼전환, p_클릭)      * 100
         p_naver_전환율   = _safe_div(p_naver_버튼전환, p_naver_클릭) * 100
         p_gsa_전환율     = _safe_div(p_gsa_버튼전환,   p_gsa_클릭)   * 100
-        p_gda_전환율     = _safe_div(p_gda_버튼전환,   p_gda_클릭)   * 100
+        p_gda_전환율     = 0.0  # DA 제외
         p_meta_전환율    = _safe_div(p_meta_버튼전환,  p_meta_클릭)  * 100
 
     _bar = lambda pv, cv, fmt: (pv, cv, fmt) if has_prev else None
@@ -1914,9 +1914,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             card_id='kpi-노출',
             bar_data=_bar(p_노출, total_노출, 'n'),
             detail_rows=[
-                ('🟢 네이버',   _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER,  _mom(naver_노출, p_naver_노출)),
-                ('🔵 구글 SA',  _f(gsa_노출),   f'비중 {_fp(gsa_노출,   total_노출)}', C_GOOGLE, _mom(gsa_노출,   p_gsa_노출)),
-                ('🔴 구글 DA',  _f(gda_노출),   f'비중 {_fp(gda_노출,   total_노출)}', C_DA,     _mom(gda_노출,   p_gda_노출)),
+                ('🟢 네이버',  _f(naver_노출), f'비중 {_fp(naver_노출, total_노출)}', C_NAVER,  _mom(naver_노출, p_naver_노출)),
+                ('🔵 구글 SA', _f(gsa_노출),   f'비중 {_fp(gsa_노출,   total_노출)}', C_GOOGLE, _mom(gsa_노출,   p_gsa_노출)),
             ] + ([('🔷 Meta', _f(meta_노출), f'비중 {_fp(meta_노출, total_노출)}', C_META, _mom(meta_노출, p_meta_노출))] if has_meta else []),
             prev_label=_prev_mon
         ) +
@@ -1927,9 +1926,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             card_id='kpi-클릭',
             bar_data=_bar(p_클릭, total_클릭, 'n'),
             detail_rows=[
-                ('🟢 네이버',   _f(naver_클릭), f'비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,  _mom(naver_클릭, p_naver_클릭)),
-                ('🔵 구글 SA',  _f(gsa_클릭),   f'비중 {_fp(gsa_클릭,   total_클릭)}', C_GOOGLE, _mom(gsa_클릭,   p_gsa_클릭)),
-                ('🔴 구글 DA',  _f(gda_클릭),   f'비중 {_fp(gda_클릭,   total_클릭)}', C_DA,     _mom(gda_클릭,   p_gda_클릭)),
+                ('🟢 네이버',  _f(naver_클릭), f'비중 {_fp(naver_클릭, total_클릭)}', C_NAVER,  _mom(naver_클릭, p_naver_클릭)),
+                ('🔵 구글 SA', _f(gsa_클릭),   f'비중 {_fp(gsa_클릭,   total_클릭)}', C_GOOGLE, _mom(gsa_클릭,   p_gsa_클릭)),
             ] + ([('🔷 Meta', _f(meta_클릭), f'비중 {_fp(meta_클릭, total_클릭)}', C_META, _mom(meta_클릭, p_meta_클릭))] if has_meta else []),
             prev_label=_prev_mon
         ) +
@@ -1940,9 +1938,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             card_id='kpi-비용',
             bar_data=_bar(p_비용, total_비용, 'won'),
             detail_rows=[
-                ('🟢 네이버',   f'₩{_f(naver_비용)}', f'비중 {_fp(naver_비용, total_비용)}', C_NAVER,  _mom(naver_비용, p_naver_비용)),
-                ('🔵 구글 SA',  f'₩{_f(gsa_비용)}',   f'비중 {_fp(gsa_비용,   total_비용)}', C_GOOGLE, _mom(gsa_비용,   p_gsa_비용)),
-                ('🔴 구글 DA',  f'₩{_f(gda_비용)}',   f'비중 {_fp(gda_비용,   total_비용)}', C_DA,     _mom(gda_비용,   p_gda_비용)),
+                ('🟢 네이버',  f'₩{_f(naver_비용)}', f'비중 {_fp(naver_비용, total_비용)}', C_NAVER,  _mom(naver_비용, p_naver_비용)),
+                ('🔵 구글 SA', f'₩{_f(gsa_비용)}',   f'비중 {_fp(gsa_비용,   total_비용)}', C_GOOGLE, _mom(gsa_비용,   p_gsa_비용)),
             ] + ([('🔷 Meta', f'₩{_f(meta_비용)}', f'비중 {_fp(meta_비용, total_비용)}', C_META, _mom(meta_비용, p_meta_비용))] if has_meta else []),
             prev_label=_prev_mon
         ) +
@@ -1953,9 +1950,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             card_id='kpi-ctr',
             bar_data=_bar(p_total_CTR, total_CTR, 'pct'),
             detail_rows=[
-                ('🟢 네이버',   f'{naver_CTR:.2f}%', f'클릭 {_f(naver_클릭)}', C_NAVER,  _mom(naver_CTR, p_naver_CTR)),
-                ('🔵 구글 SA',  f'{gsa_CTR:.2f}%',   f'클릭 {_f(gsa_클릭)}',   C_GOOGLE, _mom(gsa_CTR,   p_gsa_CTR)),
-                ('🔴 구글 DA',  f'{gda_CTR:.2f}%',   f'클릭 {_f(gda_클릭)}',   C_DA,     _mom(gda_CTR,   p_gda_CTR)),
+                ('🟢 네이버',  f'{naver_CTR:.2f}%', f'클릭 {_f(naver_클릭)}', C_NAVER,  _mom(naver_CTR, p_naver_CTR)),
+                ('🔵 구글 SA', f'{gsa_CTR:.2f}%',   f'클릭 {_f(gsa_클릭)}',   C_GOOGLE, _mom(gsa_CTR,   p_gsa_CTR)),
             ] + ([('🔷 Meta', f'{meta_CTR:.2f}%', f'클릭 {_f(meta_클릭)}', C_META, _mom(meta_CTR, p_meta_CTR))] if has_meta else []),
             prev_label=_prev_mon
         ) +
@@ -1966,9 +1962,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             card_id='kpi-cpc',
             bar_data=_bar(p_total_CPC, total_CPC, 'won'),
             detail_rows=[
-                ('🟢 네이버',   f'₩{_f(naver_CPC)}', f'비용 {_f(naver_비용)}', C_NAVER,  _mom(naver_CPC, p_naver_CPC)),
-                ('🔵 구글 SA',  f'₩{_f(gsa_CPC)}',   f'비용 {_f(gsa_비용)}',   C_GOOGLE, _mom(gsa_CPC,   p_gsa_CPC)),
-                ('🔴 구글 DA',  f'₩{_f(gda_CPC)}',   f'비용 {_f(gda_비용)}',   C_DA,     _mom(gda_CPC,   p_gda_CPC)),
+                ('🟢 네이버',  f'₩{_f(naver_CPC)}', f'비용 {_f(naver_비용)}', C_NAVER,  _mom(naver_CPC, p_naver_CPC)),
+                ('🔵 구글 SA', f'₩{_f(gsa_CPC)}',   f'비용 {_f(gsa_비용)}',   C_GOOGLE, _mom(gsa_CPC,   p_gsa_CPC)),
             ] + ([('🔷 Meta', f'₩{_f(meta_CPC)}', f'비용 {_f(meta_비용)}', C_META, _mom(meta_CPC, p_meta_CPC))] if has_meta else []),
             prev_label=_prev_mon
         ) +
@@ -1979,9 +1974,8 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             card_id='kpi-conv',
             bar_data=_bar(p_total_전환율, total_전환율, 'pct'),
             detail_rows=[
-                ('🟢 네이버',   f'{_f(naver_버튼전환)}건', f'전환율 {naver_전환율:.2f}%', C_NAVER,  _mom(naver_전환율, p_naver_전환율)),
-                ('🔵 구글 SA',  f'{_f(sa_버튼전환)}건',    f'전환율 {gsa_전환율:.2f}%',   C_GOOGLE, _mom(gsa_전환율,   p_gsa_전환율)),
-                ('🔴 구글 DA',  f'{_f(da_버튼전환)}건',    f'전환율 {gda_전환율:.2f}%',   C_DA,     _mom(gda_전환율,   p_gda_전환율)),
+                ('🟢 네이버',  f'{_f(naver_버튼전환)}건', f'전환율 {naver_전환율:.2f}%', C_NAVER,  _mom(naver_전환율, p_naver_전환율)),
+                ('🔵 구글 SA', f'{_f(sa_버튼전환)}건',    f'전환율 {gsa_전환율:.2f}%',   C_GOOGLE, _mom(gsa_전환율,   p_gsa_전환율)),
             ] + ([('🔷 Meta', f'{_f(meta_버튼전환)}건', f'전환율 {meta_전환율:.2f}%', C_META, _mom(meta_전환율, p_meta_전환율))] if has_meta else []),
             prev_label=_prev_mon
         )
@@ -1994,7 +1988,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
         total_CTR=total_CTR, total_CPC=total_CPC,
         naver_클릭=naver_클릭, naver_비용=naver_비용, naver_CTR=naver_CTR, naver_CPC=naver_CPC,
         gsa_클릭=gsa_클릭,     gsa_비용=gsa_비용,     gsa_CTR=gsa_CTR,     gsa_CPC=gsa_CPC,
-        gda_클릭=gda_클릭,     gda_비용=gda_비용,     gda_CTR=gda_CTR,     gda_CPC=gda_CPC,
+        gda_클릭=0,            gda_비용=0,            gda_CTR=0.0,         gda_CPC=0.0,
         has_prev=has_prev,
         p_노출=p_노출, p_클릭=p_클릭, p_비용=p_비용,
         p_total_CTR=p_total_CTR, p_total_CPC=p_total_CPC,
@@ -2009,8 +2003,6 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
             _btn_map[m] = naver_버튼전환
         elif m == 'Google_SA':
             _btn_map[m] = sa_버튼전환
-        elif m == 'Google_DA':
-            _btn_map[m] = da_버튼전환
         else:
             _btn_map[m] = 0
 
@@ -2156,7 +2148,7 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
 
     naver_content  = _daily_block(naver_df,  '네이버 SA',  C_NAVER,  'naver')
     gsa_content    = _daily_block(gsa_df,    '구글 SA',    C_GOOGLE, 'gsa')
-    gda_content    = _daily_block(gda_df,    '구글 DA',    C_DA,     'gda')
+    gda_content    = ''  # DA 광고 중단
 
     # 네이버 버튼 전환 블록 (총 전환수 기준)
     naver_conv_html = (
@@ -2211,35 +2203,27 @@ def build_html_report(raw_df, sa_conv_df=None, da_conv_df=None,
 
     sa_conv_content = _conv_block(sa_cd, gsa_클릭, 'SA', C_GOOGLE, prev_cd=p_sa_cd, prev_클릭수=p_gsa_클릭,
                                    curr_label=_curr_mon, prev_label=_prev_mon)
-    da_conv_content = _conv_block(da_cd, gda_클릭, 'DA', C_DA,     prev_cd=p_da_cd, prev_클릭수=p_gda_클릭,
-                                   curr_label=_curr_mon, prev_label=_prev_mon)
 
-    # SA vs DA 비교 바차트 (전월 데이터 있으면 이번달 vs 전월 함께 표시)
+    # SA 전월 비교 바차트
     btn_labels = ['상세보기', '상담예약', '상담신청']
     sa_vals = [sa_cd.get('상세보기_버튼클릭',0), sa_cd.get('상담예약_버튼클릭',0), sa_cd.get('상담신청_버튼클릭',0)]
-    da_vals = [da_cd.get('상세보기_버튼클릭',0), da_cd.get('상담예약_버튼클릭',0), da_cd.get('상담신청_버튼클릭',0)]
-    if p_sa_cd or p_da_cd:
+    if p_sa_cd:
         p_sa_vals = [p_sa_cd.get('상세보기_버튼클릭',0), p_sa_cd.get('상담예약_버튼클릭',0), p_sa_cd.get('상담신청_버튼클릭',0)]
-        p_da_vals = [p_da_cd.get('상세보기_버튼클릭',0), p_da_cd.get('상담예약_버튼클릭',0), p_da_cd.get('상담신청_버튼클릭',0)]
         svg_conv_bar = _svg_bar_grouped(
             btn_labels,
-            [(f'SA {_curr_mon}', sa_vals, C_GOOGLE), (f'SA {_prev_mon}', p_sa_vals, '#A8C4F5'),
-             (f'DA {_curr_mon}', da_vals, C_DA),     (f'DA {_prev_mon}', p_da_vals, '#F2A9A2')],
+            [(f'SA {_curr_mon}', sa_vals, C_GOOGLE), (f'SA {_prev_mon}', p_sa_vals, '#A8C4F5')],
         )
-        conv_chart_title = f'SA · DA 버튼 전환 — {_curr_mon} vs {_prev_mon}'
+        conv_chart_title = f'구글 SA 버튼 전환 — {_curr_mon} vs {_prev_mon}'
     else:
         svg_conv_bar = _svg_bar_grouped(
             btn_labels,
-            [('Google SA', sa_vals, C_GOOGLE), ('Google DA', da_vals, C_DA)],
+            [('Google SA', sa_vals, C_GOOGLE)],
         )
-        conv_chart_title = 'SA vs DA 버튼별 전환 비교'
+        conv_chart_title = '구글 SA 버튼별 전환'
 
     conv_content = (
         f'{_chart_block(conv_chart_title, svg_conv_bar)}'
-        f'<div class="two-col-conv">'
         f'<div>{sa_conv_content}</div>'
-        f'<div>{da_conv_content}</div>'
-        f'</div>'
     )
 
     # ══════════════════════════════════════
@@ -2459,9 +2443,7 @@ td.pct {{ background: #FFFBEB; font-weight: 600; color: #92400E; }}
 
     {_section('🔵 구글 SA (검색)', C_GOOGLE, gsa_content + sa_conv_content)}
 
-    {_section('🔴 구글 DA (실적 최대화)', C_DA, gda_content + da_conv_content)}
-
-    {_section('🎯 버튼 전환 상세 (SA / DA 비교)', C_GOOGLE, conv_content)}
+    {_section('🎯 구글 SA 버튼 전환 상세', C_GOOGLE, conv_content)}
 
   </div>
 
