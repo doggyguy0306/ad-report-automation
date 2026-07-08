@@ -1461,17 +1461,19 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
 
         # [B] 이번달 vs 전월 비교 바차트 2개 나란히
         if has_prev_ig:
-            # 참여 지표
+            # 참여 지표 (합계)
             eng_chart = _svg_bar_grouped(
                 ['게시물 수', '좋아요', '저장수'],
                 [(curr_label, [float(post_count), float(total_likes), float(total_saved)], C_IG),
                  (prev_label, [float(p_post_count), float(p_total_likes), float(p_total_saved)], '#F0B8D4')],
             )
-            # 도달 지표
+            # 도달 지표 (합계 + 일평균 — 조회수 포함 시 일평균 조회수 추가)
             if total_views > 0 or p_total_views > 0:
-                reach_labels = ['총 도달수', '일평균 도달수', '총 조회수']
-                reach_curr_vals = [float(total_reach), float(avg_reach), float(total_views)]
-                reach_prev_vals = [float(p_total_reach), float(p_avg_reach), float(p_total_views)]
+                _ig_avg_views_curr = total_views / _ig_cal_days
+                _ig_avg_views_prev = p_total_views / _p_ig_cal_days
+                reach_labels = ['총 도달수', '일평균 도달수', '총 조회수', '일평균 조회수']
+                reach_curr_vals = [float(total_reach), float(avg_reach), float(total_views), _ig_avg_views_curr]
+                reach_prev_vals = [float(p_total_reach), float(p_avg_reach), float(p_total_views), _ig_avg_views_prev]
             else:
                 reach_labels = ['총 도달수', '일평균 도달수']
                 reach_curr_vals = [float(total_reach), float(avg_reach)]
@@ -1481,15 +1483,35 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
                 [(curr_label, reach_curr_vals, C_IG),
                  (prev_label, reach_prev_vals, '#F0B8D4')],
             )
+            # 일 평균 참여 지표 차트 (좋아요 · 저장수 일평균 — 합계와 스케일이 달라 별도 표시)
+            _avg_likes_curr = total_likes / _ig_cal_days
+            _avg_likes_prev = p_total_likes / _p_ig_cal_days
+            _avg_saved_curr = total_saved / _ig_cal_days
+            _avg_saved_prev = p_total_saved / _p_ig_cal_days
+            avg_eng_chart = _svg_bar_grouped(
+                ['일평균 좋아요', '일평균 저장수'],
+                [(curr_label, [_avg_likes_curr, _avg_saved_curr], C_IG),
+                 (prev_label, [_avg_likes_prev, _avg_saved_prev], '#F0B8D4')],
+            )
             parts.append(
                 f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
                 f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
-                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">참여 지표</div>'
+                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">참여 지표 (합계)</div>'
                 f'{eng_chart}</div>'
                 f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
-                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">도달 지표</div>'
+                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">도달 지표 (합계 · 일 평균)</div>'
                 f'{reach_chart}</div>'
                 f'</div>'
+                # 일 평균 참여 지표 (작은 카드)
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
+                f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
+                f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">일 평균 참여 지표 (좋아요 · 저장수)</div>'
+                f'{avg_eng_chart}</div>'
+                f'<div style="background:#fdf2f8;border:1px dashed #f0b8d4;border-radius:10px;padding:16px;display:flex;align-items:center;justify-content:center">'
+                f'<div style="text-align:center;color:#c08ca8;font-size:12px">'
+                f'<div style="font-size:28px;margin-bottom:6px">📊</div>'
+                f'도달 · 조회 일 평균은<br>왼쪽 <b>도달 지표</b> 차트에<br>포함되어 있습니다</div>'
+                f'</div></div>'
             )
         else:
             # has_prev_ig가 False인 경우: 4개 메트릭 4-column grid
@@ -1570,17 +1592,29 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
             f'{chart}</div>'
         )
 
-    # ── 게시물별 성과 테이블 ────────────────────────
+    # ── 게시물별 성과 테이블 (이번달 + 전월 통합) ────
     if ig_media_df is not None and not ig_media_df.empty:
-        df = ig_media_df.copy()
-        # 도달수 기준 내림차순 정렬
+        # 이번달 + 전월 게시물 합치기 (전월 데이터 있을 때)
+        _frames = [ig_media_df.copy()]
+        _frames[0]['_기간'] = curr_label
+        if prev_ig_media_df is not None and not prev_ig_media_df.empty:
+            _pf = prev_ig_media_df.copy()
+            _pf['_기간'] = prev_label
+            _frames.append(_pf)
+        df = pd.concat(_frames, ignore_index=True)
         if '도달수' in df.columns:
             df = df.sort_values('도달수', ascending=False)
+
+        _has_multi_period = '_기간' in df.columns and df['_기간'].nunique() > 1
+        _curr_cnt = len(ig_media_df)
+        _prev_cnt = len(prev_ig_media_df) if prev_ig_media_df is not None and not prev_ig_media_df.empty else 0
+        _title_extra = f' ({curr_label} {_curr_cnt}개 + {prev_label} {_prev_cnt}개)' if _has_multi_period else ''
 
         rows_html = ''
         type_icon = {'IMAGE': '🖼', 'VIDEO': '🎬', 'CAROUSEL_ALBUM': '📸'}
         for _, row in df.iterrows():
             날짜 = str(row.get('날짜', ''))[:10]
+            기간 = str(row.get('_기간', ''))
             유형 = row.get('유형', '')
             icon = type_icon.get(유형, '📄')
             caption = str(row.get('캡션', ''))[:30] or '(캡션 없음)'
@@ -1588,8 +1622,14 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
             comments_val= int(row.get('댓글', 0) or 0)
             reach_val   = int(row.get('도달수', 0) or 0)
             saved   = _f(row.get('저장수', 0))
+            # 기간 뱃지 색상 (이번달=진한 핑크, 전월=연한 핑크)
+            badge_bg  = C_IG if 기간 == curr_label else '#F0B8D4'
+            badge_txt = '#fff' if 기간 == curr_label else '#9B4466'
+            period_badge = (f'<span style="display:inline-block;padding:1px 6px;border-radius:8px;'
+                            f'background:{badge_bg};color:{badge_txt};font-size:10px;font-weight:600">'
+                            f'{기간}</span> ') if _has_multi_period else ''
             rows_html += f'''<tr class="ig-post-row" data-reach="{reach_val}" data-likes="{likes_val}" data-comments="{comments_val}">
-              <td style="padding:8px 10px;font-size:12px;color:#555">{날짜}</td>
+              <td style="padding:8px 10px;font-size:12px;color:#555">{period_badge}{날짜}</td>
               <td style="padding:8px 10px;font-size:12px">{icon} {유형.replace("CAROUSEL_ALBUM","카루셀").replace("IMAGE","이미지").replace("VIDEO","동영상")}</td>
               <td style="padding:8px 10px;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{caption}</td>
               <td style="padding:8px 10px;font-size:12px;text-align:right;color:{C_IG};font-weight:600">{_f(reach_val)}</td>
@@ -1601,7 +1641,7 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
         parts.append(f'''
         <div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px;overflow-x:auto">
           <div style="font-size:13px;font-weight:600;color:{C_IG};margin-bottom:12px">
-            📸 게시물별 성과 (전체 {len(df)}개)
+            📸 게시물별 성과 (전체 {len(df)}개{_title_extra})
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
             <span style="font-size:12px;color:#666">정렬 기준:</span>
