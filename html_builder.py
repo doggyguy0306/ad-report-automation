@@ -1781,8 +1781,8 @@ def build_html_report(raw_df, sa_conv_df=None,
     gsa_df    = raw_df[raw_df['매체'] == 'Google_SA']
     gda_df    = raw_df[raw_df['매체'] == 'Google_DA']   # DA 중단 — 빈 df가 될 것
     google_df = raw_df[raw_df['매체'].str.startswith('Google')]
-    meta_df   = raw_df[raw_df['매체'] == 'Meta']
-    has_meta  = not meta_df.empty
+    meta_df   = pd.DataFrame()  # Meta 광고 중단
+    has_meta  = False
 
     naver_클릭  = naver_df['클릭'].sum()
     gsa_클릭    = gsa_df['클릭'].sum()
@@ -1816,26 +1816,22 @@ def build_html_report(raw_df, sa_conv_df=None,
         p_naver_df = prev_raw_df[prev_raw_df['매체'].str.startswith('Naver')]
         p_gsa_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_SA']
         p_gda_df   = prev_raw_df[prev_raw_df['매체'] == 'Google_DA']  # 전월에 DA 있었더라도 집계
-        p_meta_df  = prev_raw_df[prev_raw_df['매체'] == 'Meta']
-        # 전월 총계에서 DA 제외 (SA+네이버 기준 비교)
-        p_노출 = (p_naver_df['노출'].sum() + p_gsa_df['노출'].sum() +
-                  (p_meta_df['노출'].sum() if not p_meta_df.empty else 0))
-        p_클릭 = (p_naver_df['클릭'].sum() + p_gsa_df['클릭'].sum() +
-                  (p_meta_df['클릭'].sum() if not p_meta_df.empty else 0))
-        p_비용 = (p_naver_df['비용'].sum() + p_gsa_df['비용'].sum() +
-                  (p_meta_df['비용'].sum() if not p_meta_df.empty else 0))
+        # 전월 총계에서 DA·Meta 제외 (SA+네이버 기준 비교)
+        p_노출 = p_naver_df['노출'].sum() + p_gsa_df['노출'].sum()
+        p_클릭 = p_naver_df['클릭'].sum() + p_gsa_df['클릭'].sum()
+        p_비용 = p_naver_df['비용'].sum() + p_gsa_df['비용'].sum()
         p_naver_노출 = p_naver_df['노출'].sum()
         p_gsa_노출   = p_gsa_df['노출'].sum()
         p_gda_노출   = 0  # DA 제외
-        p_meta_노출  = p_meta_df['노출'].sum() if not p_meta_df.empty else 0
+        p_meta_노출  = 0  # Meta 중단
         p_naver_클릭 = p_naver_df['클릭'].sum()
         p_gsa_클릭   = p_gsa_df['클릭'].sum()
         p_gda_클릭   = 0  # DA 제외
-        p_meta_클릭  = p_meta_df['클릭'].sum() if not p_meta_df.empty else 0
+        p_meta_클릭  = 0  # Meta 중단
         p_naver_비용 = p_naver_df['비용'].sum()
         p_gsa_비용   = p_gsa_df['비용'].sum()
         p_gda_비용   = 0  # DA 제외
-        p_meta_비용  = p_meta_df['비용'].sum() if not p_meta_df.empty else 0
+        p_meta_비용  = 0  # Meta 중단
 
     # 기간 월 레이블 자동 도출
     def _month_label(df):
@@ -1897,7 +1893,7 @@ def build_html_report(raw_df, sa_conv_df=None,
         else:
             p_gsa_버튼전환 = p_gsa_df['전환'].sum()
         p_gda_버튼전환 = 0  # DA 제외
-        p_meta_버튼전환  = p_meta_df['전환'].sum() if not p_meta_df.empty else 0
+        p_meta_버튼전환  = 0  # Meta 중단
         p_total_버튼전환 = p_naver_버튼전환 + p_gsa_버튼전환
         p_total_전환율   = _safe_div(p_total_버튼전환, p_클릭)      * 100
         p_naver_전환율   = _safe_div(p_naver_버튼전환, p_naver_클릭) * 100

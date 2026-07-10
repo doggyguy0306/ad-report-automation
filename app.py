@@ -127,34 +127,23 @@ prev_gda_conv_files = []
 
 st.divider()
 
-# ── Meta 광고 + Instagram 유기 데이터 연동 (선택) ─────────
-with st.expander("🔷 Meta 광고 + 📸 Instagram 유기 데이터 연동 (선택사항)", expanded=False):
+# ── Instagram 유기 데이터 연동 (선택) ─────────
+# Meta 광고는 전환 데이터 신뢰성 문제로 보고에서 제외됨
+meta_file = None
+with st.expander("📸 Instagram 유기 데이터 연동 (선택사항)", expanded=False):
     st.caption(
-        "Meta 광고·Instagram 유기 CSV를 업로드하면 보고서에 자동 포함됩니다.  \n"
-        "Meta: `meta_scraper.py` 실행 → `meta_광고성과_*.csv`  \n"
+        "Instagram 유기 CSV를 업로드하면 보고서에 자동 포함됩니다.  \n"
         "Instagram: `instagram_scraper.py` 실행 → `instagram_게시물성과_*.csv` 하나만 업로드하면 됩니다."
     )
-    mc1, mc2 = st.columns(2)
-    with mc1:
-        st.markdown("**🔷 Meta 광고 성과**")
-        meta_file = st.file_uploader(
-            "meta_광고성과_*.csv",
-            type="csv",
-            key="meta",
-            help="meta_scraper.py 로 생성된 Meta 광고 성과 CSV"
-        )
-        if meta_file:
-            st.caption(f"📎 {meta_file.name}")
-    with mc2:
-        st.markdown("**📸 Instagram 게시물 성과**")
-        ig_media_file = st.file_uploader(
-            "instagram_게시물성과_*.csv",
-            type="csv",
-            key="ig_media",
-            help="instagram_scraper.py 로 생성된 게시물 성과 CSV — 하나만 올리면 일별 차트도 자동 생성!"
-        )
-        if ig_media_file:
-            st.caption(f"📎 {ig_media_file.name}")
+    st.markdown("**📸 Instagram 게시물 성과**")
+    ig_media_file = st.file_uploader(
+        "instagram_게시물성과_*.csv",
+        type="csv",
+        key="ig_media",
+        help="instagram_scraper.py 로 생성된 게시물 성과 CSV — 하나만 올리면 일별 차트도 자동 생성!"
+    )
+    if ig_media_file:
+        st.caption(f"📎 {ig_media_file.name}")
 
 st.divider()
 
@@ -309,46 +298,7 @@ if generate:
                 else:
                     st.caption(f"✅ 전월 동기간 자동 감지: {prev_start} ~ {prev_end} ({len(prev_raw_df)}행)")
 
-                # ── Meta 광고 CSV 처리 ────────────────────
-                if meta_file:
-                    try:
-                        meta_file.seek(0)
-                        _m = pd.read_csv(meta_file, encoding='utf-8-sig')
-                        _m['날짜'] = pd.to_datetime(_m['날짜'])
-                        _m['매체'] = 'Meta'
-                        if '디바이스' not in _m.columns:
-                            _m['디바이스'] = '전체'
-                        common_cols = [c for c in ['날짜', '매체', '디바이스', '노출', '클릭', '비용', '전환', 'CTR', 'CPC'] if c in _m.columns]
-                        _m_filtered = _m[common_cols]
-                        # 이번 기간
-                        mask_meta = (
-                            (_m_filtered['날짜'] >= pd.Timestamp(report_start)) &
-                            (_m_filtered['날짜'] <= pd.Timestamp(report_end))
-                        )
-                        meta_filtered = _m_filtered[mask_meta]
-                        if not meta_filtered.empty:
-                            raw_df = pd.concat([raw_df, meta_filtered], ignore_index=True)
-                            raw_df = raw_df.sort_values(['날짜', '매체']).reset_index(drop=True)
-                            st.caption(f"✅ Meta 광고 데이터 {len(meta_filtered)}일치 포함")
-                        else:
-                            st.caption("ℹ️ Meta CSV: 선택 기간 내 데이터 없음")
-                        # 전월 비교 기간 — prev_raw_df에 Meta 전월 데이터 추가
-                        mask_meta_prev = (
-                            (_m_filtered['날짜'] >= pd.Timestamp(prev_start)) &
-                            (_m_filtered['날짜'] <= pd.Timestamp(prev_end))
-                        )
-                        meta_prev = _m_filtered[mask_meta_prev]
-                        if not meta_prev.empty:
-                            if prev_raw_df is None:
-                                prev_raw_df = meta_prev.copy()
-                            else:
-                                prev_raw_df = pd.concat([prev_raw_df, meta_prev], ignore_index=True)
-                                prev_raw_df = prev_raw_df.sort_values(['날짜', '매체']).reset_index(drop=True)
-                            st.caption(f"✅ Meta 전월 데이터 {len(meta_prev)}일치 포함 ({prev_start} ~ {prev_end})")
-                        else:
-                            st.caption(f"ℹ️ Meta CSV: 비교 기간 내 데이터 없음 ({prev_start} ~ {prev_end})")
-                    except Exception as e:
-                        st.warning(f"⚠️ Meta CSV 로드 실패: {e}")
+                # Meta 광고는 전환 데이터 신뢰성 문제로 보고에서 제외됨 (meta_file = None)
 
                 # ── Instagram 유기 CSV 처리 ───────────────
                 ig_account_df    = None   # 게시물 데이터에서 자동 계산됨
@@ -508,7 +458,6 @@ with st.expander("📌 파일명 규칙 안내"):
     | 구글 SA | 키워드 | `검색 키워드` | Google Ads 다운로드 |
     | 구글 SA | 전환 | `전환` | Google Ads 다운로드 |
     | 구글 SA | 검색어 | `검색어` | Google Ads 다운로드 |
-    | **Meta 광고** | 광고 성과 | `meta_광고성과_` | `python meta_scraper.py` |
     | **Instagram** | 계정 인사이트 | `instagram_계정인사이트_` | `python instagram_scraper.py` |
     | **Instagram** | 게시물 성과 | `instagram_게시물성과_` | `python instagram_scraper.py` |
     """)
