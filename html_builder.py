@@ -255,9 +255,10 @@ def _svg_dual_line(dates, vals1, color1, label1, vals2, color2, label2, title=''
             f'{dots_hover}{x_lbl}</svg>')
 
 
-def _svg_bar_grouped(group_labels, datasets, title=''):
+def _svg_bar_grouped(group_labels, datasets, title='', fs=12):
     """grouped bar chart SVG (폰트 확대 + CSS hover 툴팁 효과)
     datasets: [(name, [values], color), ...]
+    fs: 기본 폰트 크기 (기본 12, 3열 레이아웃 등 좁은 경우 14 권장)
     """
     W, H = 740, 340
     PL, PR, PT, PB = 84, 20, (58 if title else 22), 72
@@ -288,7 +289,7 @@ def _svg_bar_grouped(group_labels, datasets, title=''):
         grid += (f'<line x1="{PL}" y1="{gy:.1f}" x2="{PL+cw}" y2="{gy:.1f}" '
                  f'stroke="#EEEEEE" stroke-width="1"/>'
                  f'<text x="{PL-8}" y="{gy+5:.1f}" text-anchor="end" '
-                 f'font-size="12" fill="{C_MUTED}">{_f(gv)}</text>')
+                 f'font-size="{fs}" fill="{C_MUTED}">{_f(gv)}</text>')
 
     group_w = cw / n
     bar_w   = group_w * 0.7 / nd
@@ -314,24 +315,24 @@ def _svg_bar_grouped(group_labels, datasets, title=''):
                 # 막대
                 f'<rect class="bar-rect" x="{bx:.1f}" y="{by:.1f}" '
                 f'width="{bar_w:.1f}" height="{max(bh, 0.5):.1f}" fill="{color}" rx="3"/>'
-                # 값 레이블 (font-size 12, bold)
+                # 값 레이블 (bold)
                 f'<text class="bar-val" x="{bx + bar_w/2:.1f}" y="{max(PT+16, by-5):.1f}" '
-                f'text-anchor="middle" font-size="12" font-weight="bold" fill="{color}">{_f(v)}</text>'
+                f'text-anchor="middle" font-size="{fs}" font-weight="bold" fill="{color}">{_f(v)}</text>'
                 # 호버 툴팁 (CSS display:none → block)
                 f'<g class="bar-tip">'
                 f'  <rect x="{tip_x:.1f}" y="{tip_y:.1f}" width="{tip_w:.1f}" height="23" '
                 f'    fill="#1C1C1E" rx="5" opacity="0.90"/>'
                 f'  <text x="{bx + bar_w/2:.1f}" y="{tip_y + 16:.1f}" '
-                f'    text-anchor="middle" font-size="12" font-weight="600" fill="white">{tip_txt}</text>'
+                f'    text-anchor="middle" font-size="{fs}" font-weight="600" fill="white">{tip_txt}</text>'
                 f'</g>'
                 f'</g>'
             )
-        # X축 그룹 레이블 (font-size 13, bold)
+        # X축 그룹 레이블
         lx_lbl = PL + gi * group_w + group_w / 2
         bars += (f'<text x="{lx_lbl:.1f}" y="{PT+ch+22}" text-anchor="middle" '
-                 f'font-size="13" font-weight="600" fill="{C_TEXT}">{g_lbl}</text>')
+                 f'font-size="{fs+1}" font-weight="600" fill="{C_TEXT}">{g_lbl}</text>')
 
-    # 범례 (font-size 13)
+    # 범례
     legend = ''
     leg_item_w = 120
     total_leg_w = nd * leg_item_w
@@ -339,7 +340,7 @@ def _svg_bar_grouped(group_labels, datasets, title=''):
     for di, (name, _, color) in enumerate(datasets):
         lx = lx0 + di * leg_item_w
         legend += (f'<rect x="{lx:.1f}" y="{H-24}" width="14" height="14" fill="{color}" rx="3"/>'
-                   f'<text x="{lx+20:.1f}" y="{H-13}" font-size="13" font-weight="500" fill="{C_TEXT}">{name}</text>')
+                   f'<text x="{lx+20:.1f}" y="{H-13}" font-size="{fs+1}" font-weight="500" fill="{C_TEXT}">{name}</text>')
 
     axes = (f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>'
             f'<line x1="{PL}" y1="{PT+ch}" x2="{PL+cw}" y2="{PT+ch}" stroke="#CCC" stroke-width="1"/>')
@@ -1466,6 +1467,7 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
                 ['게시물 수', '좋아요', '저장수'],
                 [(curr_label, [float(post_count), float(total_likes), float(total_saved)], C_IG),
                  (prev_label, [float(p_post_count), float(p_total_likes), float(p_total_saved)], '#F0B8D4')],
+                fs=14,
             )
             # 도달 지표 (합계 + 일평균 — 조회수 포함 시 일평균 조회수 추가)
             if total_views > 0 or p_total_views > 0:
@@ -1482,6 +1484,7 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
                 reach_labels,
                 [(curr_label, reach_curr_vals, C_IG),
                  (prev_label, reach_prev_vals, '#F0B8D4')],
+                fs=14,
             )
             # 일 평균 참여 지표 차트 (좋아요 · 저장수 일평균 — 합계와 스케일이 달라 별도 표시)
             _avg_likes_curr = total_likes / _ig_cal_days
@@ -1492,26 +1495,21 @@ def _build_instagram_section(ig_account_df, ig_media_df, prev_ig_media_df=None) 
                 ['일평균 좋아요', '일평균 저장수'],
                 [(curr_label, [_avg_likes_curr, _avg_saved_curr], C_IG),
                  (prev_label, [_avg_likes_prev, _avg_saved_prev], '#F0B8D4')],
+                fs=14,
             )
             parts.append(
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
+                # 3개 차트 1줄 3열 배치
+                f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">'
                 f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
                 f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">참여 지표 (합계)</div>'
                 f'{eng_chart}</div>'
                 f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
                 f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">도달 지표 (합계 · 일 평균)</div>'
                 f'{reach_chart}</div>'
-                f'</div>'
-                # 일 평균 참여 지표 (작은 카드)
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
                 f'<div style="background:#fff;border:1px solid #f0b8d4;border-radius:10px;padding:16px">'
                 f'<div style="font-size:12px;font-weight:600;color:{C_IG};margin-bottom:8px">일 평균 참여 지표 (좋아요 · 저장수)</div>'
                 f'{avg_eng_chart}</div>'
-                f'<div style="background:#fdf2f8;border:1px dashed #f0b8d4;border-radius:10px;padding:16px;display:flex;align-items:center;justify-content:center">'
-                f'<div style="text-align:center;color:#c08ca8;font-size:12px">'
-                f'<div style="font-size:28px;margin-bottom:6px">📊</div>'
-                f'도달 · 조회 일 평균은<br>왼쪽 <b>도달 지표</b> 차트에<br>포함되어 있습니다</div>'
-                f'</div></div>'
+                f'</div>'
             )
         else:
             # has_prev_ig가 False인 경우: 4개 메트릭 4-column grid
